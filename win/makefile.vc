@@ -160,7 +160,7 @@ Please `cd` to its location first.
 PROJECT = tkvideo
 !include "rules.vc"
 
-DOTVERSION      = 0.1
+DOTVERSION      = 1.0.0
 VERSION         = $(DOTVERSION:.=)
 STUBPREFIX      = $(PROJECT)stub
 
@@ -340,6 +340,24 @@ demo: setup $(PROJECT)
 setup:
 	@if not exist $(OUT_DIR)\nul mkdir $(OUT_DIR)
 	@if not exist $(TMP_DIR)\nul mkdir $(TMP_DIR)
+
+PRJVFS=$(PROJECT)$(VERSION).vfs
+PRJKIT=$(PRJVFS:.vfs=.kit)
+starkit: $(PRJLIB)
+	@if not exist $(PRJVFS)\nul mkdir $(PRJVFS)
+	@if not exist $(PRJVFS)\lib\nul mkdir $(PRJVFS)\lib
+	@if not exist $(PRJVFS)\lib\$(PROJECT)\nul mkdir $(PRJVFS)\lib\$(PROJECT)
+	@$(CPY) $(PRJLIB) $(PRJVFS)\lib\$(PROJECT) >NUL
+	@$(CPY) $(ROOT)\demos $(PRJVFS)\demos >NUL
+	@echo package ifneeded $(PROJECT) $(DOTVERSION) [list load [file join $$dir $(PRJLIBNAME)]] > $(PRJVFS)\lib\$(PROJECT)\pkgIndex.tcl
+	@type << >$(PRJVFS)\main.tcl
+package require starkit
+if {[starkit::startup] == "sourced"} {return}
+source [file join $$::starkit::topdir demos demo.tcl]
+<<
+	@sdx wrap $(PRJKIT)
+	@del $(PRJKIT:.kit=.bat)
+	@echo Created $(PRJKIT)
 
 $(PRJLIB): $(DLLOBJS)
 	$(link32) $(dlllflags) -out:$@ $(baselibs) @<<
