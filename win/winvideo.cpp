@@ -382,7 +382,7 @@ ConstructFileGraph(LPOLESTR sFilename, IGraphBuilder **ppGraphBuilder)
 
 /**
  *  Build a DirectX Video Capture graph for the given video input device.
- *  The graph will contain a Sample Grabber and a WiREVideoRenderer.
+ *  The graph will contain a Sample Grabber and a VideoRenderer.
  */
 static HRESULT
 ConstructCaptureGraph(int DeviceIndex, IGraphBuilder **ppGraphBuilder)
@@ -501,17 +501,16 @@ ConnectFilterGraph(IGraphBuilder *pGraphBuilder,
     AM_MEDIA_TYPE mt;
     ZeroMemory(&mt, sizeof(AM_MEDIA_TYPE));
     mt.majortype = MEDIATYPE_Video;
-    int iBitDepth = GetDeviceCaps(::GetDC(HWND_DESKTOP), BITSPIXEL);
+    HDC hdc = ::GetDC(HWND_DESKTOP);
+    int iBitDepth = GetDeviceCaps(hdc, BITSPIXEL);
+    ::ReleaseDC(HWND_DESKTOP, hdc);
+
     switch (iBitDepth) {
     case  8: mt.subtype = MEDIASUBTYPE_RGB8;   break;
     case 24: mt.subtype = MEDIASUBTYPE_RGB24;  break;
     case 32: mt.subtype = MEDIASUBTYPE_RGB32;  break;
-    default: mt.subtype = MEDIASUBTYPE_RGB555; break;
+    default: mt.subtype = MEDIASUBTYPE_RGB565; break;
     }
-
-    CComQIPtr<ISampleGrabber> pSampleGrabber(pGrabberFilter);
-    if (pSampleGrabber)
-        hr = pSampleGrabber->SetMediaType(&mt);
 
     CComPtr<IPin> pCapturePin, pRenderPin, pGrabIn, pGrabOut;
     if (SUCCEEDED(hr))
@@ -522,6 +521,10 @@ ConnectFilterGraph(IGraphBuilder *pGraphBuilder,
         hr = FindPinByDirection(pGrabberFilter, PINDIR_INPUT, &pGrabIn);
     if (SUCCEEDED(hr))
         hr = FindPinByDirection(pGrabberFilter, PINDIR_OUTPUT, &pGrabOut);
+
+    CComQIPtr<ISampleGrabber> pSampleGrabber(pGrabberFilter);
+    if (pSampleGrabber)
+        hr = pSampleGrabber->SetMediaType(&mt);
 
     if (SUCCEEDED(hr))
         hr = pGraphBuilder->Connect(pCapturePin, pGrabIn);
@@ -565,22 +568,26 @@ ConnectVideo(IGraphBuilder *pGraphBuilder, HWND hwnd, IVideoWindow **ppVideoWind
     CComPtr<IVideoWindow> pVideoWindow;
     CComPtr<IMediaEventEx> pMediaEvent;
     RECT rc;
+    
+    HRESULT hr = E_INVALIDARG;
+    if (::IsWindow(hwnd))
+    {
+        ::GetClientRect(hwnd, &rc);
 
-    ::GetClientRect(hwnd, &rc);
-
-    HRESULT hr = pGraphBuilder->QueryInterface(&pMediaEvent);
-    if (SUCCEEDED(hr))
-        hr = pGraphBuilder->QueryInterface(&pVideoWindow);
-    if (SUCCEEDED(hr))
-        hr = pVideoWindow->put_Owner((OAHWND)hwnd);
-    if (SUCCEEDED(hr))
-        hr = pVideoWindow->put_WindowStyle(WS_CHILD | WS_CLIPCHILDREN);
-    if (SUCCEEDED(hr))
-        hr = pVideoWindow->SetWindowPosition(rc.left, rc.top, rc.right, rc.bottom);
-    if (SUCCEEDED(hr))
-        hr = pVideoWindow->put_Visible(OATRUE);
-    if (SUCCEEDED(hr))
-        hr = pVideoWindow.CopyTo(ppVideoWindow);
+        hr = pGraphBuilder->QueryInterface(&pMediaEvent);
+        if (SUCCEEDED(hr))
+            hr = pGraphBuilder->QueryInterface(&pVideoWindow);
+        if (SUCCEEDED(hr))
+            hr = pVideoWindow->put_Owner((OAHWND)hwnd);
+        if (SUCCEEDED(hr))
+            hr = pVideoWindow->put_WindowStyle(WS_CHILD | WS_CLIPCHILDREN);
+        if (SUCCEEDED(hr))
+            hr = pVideoWindow->SetWindowPosition(rc.left, rc.top, rc.right, rc.bottom);
+        if (SUCCEEDED(hr))
+            hr = pVideoWindow->put_Visible(OATRUE);
+        if (SUCCEEDED(hr))
+            hr = pVideoWindow.CopyTo(ppVideoWindow);
+    }
     return hr;
 }
 

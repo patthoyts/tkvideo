@@ -1,0 +1,32 @@
+[manpage_begin tkvideo n 1.0.0]
+[copyright {2004, Pat Thoyts}]
+[moddesc   {tkvideo}]
+[titledesc {Tk video widget}]
+[require Tk 8.4]
+[require tkvideo [opt 1.0.0]]
+[description]
+[para]
+
+
+[section COMMANDS]
+
+[list_begin definitions]
+
+[call [cmd "tkvideo"] [arg "pathname"] [opt [arg "?options ...?"]]]
+
+[list_end]
+
+[section EXAMPLES]
+
+[para]
+[example {
+% pack [tkvideo .v -source 0] -expand 1 -fill both
+.v
+% .v start
+}]
+   
+[section AUTHORS]
+Pat Thoyts <patthoyts@users.berlios.de>
+
+[keywords video webcam mpeg avi]
+[manpage_end]

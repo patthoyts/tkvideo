@@ -212,9 +212,12 @@ DOCDIR		= $(ROOT)\doc
 TOOLSDIR	= $(ROOT)\tools
 COMPATDIR	= $(ROOT)\compat
 
-### Find a tclsh for testing and installation.
+### Find a tclsh and wish for testing and installation.
 !if !exist("$(TCLSH)")
 TCLSH           = $(BIN_INSTALL_DIR)\tclsh$(TCL_VERSION).exe
+!endif
+!if !exist("$(WISH)")
+WISH           = $(BIN_INSTALL_DIR)\wish$(TCL_VERSION).exe
 !endif
 
 #---------------------------------------------------------------------
@@ -327,6 +330,12 @@ test: setup $(PROJECT)
 	$(TCLSH) "$(ROOT)/tests/all.tcl" $(TESTFLAGS) > tests.log
 	type tests.log | more
 !endif
+
+demo: setup $(PROJECT)
+	$(WISH) <<
+	load [file join [file normalize {$(OUT_DIR)}] $(PRJLIBNAME)]
+	source [file join [file normalize {$(ROOT)}] demos demo.tcl]
+<<
 
 setup:
 	@if not exist $(OUT_DIR)\nul mkdir $(OUT_DIR)

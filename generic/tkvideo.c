@@ -1,4 +1,5 @@
 #include "tkvideo.h"
+#include <stdio.h>
 
 /* ---------------------------------------------------------------------- */
 #define DEF_VIDEO_BACKGROUND   "SystemButtonFace"

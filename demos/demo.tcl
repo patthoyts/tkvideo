@@ -1,4 +1,25 @@
-load debug/tkvideo01g.dll
+# demo.tcl - Copyright (C) 2004 Pat Thoyts <patthoyts@users.sourceforge.net>
+#
+# Tk video widget demo application.
+#
+# $Id$
+
+package require Tk
+package require tkvideo
+
+# -------------------------------------------------------------------------
+
+# Deal with 'tile' support.
+# We sometimes need to _really_ use the Tk widgets at the moment...
+#
+rename ::label ::tk::label
+rename ::radiobutton ::tk::radiobutton
+if {![catch {package require tile 0.4}]} {
+    namespace import -force tile::*
+} else {
+    interp alias {} label {} ::tk::label
+    interp alias {} radiobutton {} ::tk::radiobutton
+}
 
 # -------------------------------------------------------------------------
 
@@ -42,6 +63,8 @@ proc onExit {} {
 # Create the basic widgets and menus.
 #
 
+wm title . {Tk video widget demo}
+
 tkvideo .v -bg white \
     -xscrollcommand {sbset .sx} -yscrollcommand {sbset .sy}
 frame .buttons
@@ -63,42 +86,35 @@ foreach name [.v devices] {
         -command [list onSource $name]
 }
 
-#
-# Lets use the Tile styling stuff if we can find it :)
-#
-
-if {![catch {load [file join $env(TILE_LIBRARY) .. win debug tile01g.dll]}]} {
-
-    tscrollbar .sy -orient vertical -command {vview y}
-    tscrollbar .sx -orient horizontal -command {vview x}
-
-    tbutton .buttons.run -text {>} -command {.v start}
-    tbutton .buttons.pause -text {||} -command {.v pause}
-    tbutton .buttons.props -text {Properties} -command {.v prop filter}
-    tcheckbutton .buttons.stretch -text Stretch -variable stretch \
-        -command onStretch
-
-    .menu add cascade -label Theme -underline 0 \
-        -menu [menu .menu.theme -tearoff 0]
-    foreach themeid [lsearch -glob -all [package names] tile::*] {
-        set name [lindex [package names] $themeid]
-        set name [lindex [split $name :] end]
-        .menu.theme add command -label $name -underline 0 \
-            -command [list style settheme $name]
+if {[package provide tile] != {}} {
+    .menu add cascade -label "Tk themes" -menu [menu .menu.themes -tearoff 0]
+    foreach theme [style theme names] {
+        .menu.themes add radiobutton -label [string totitle $theme] \
+            -variable ::Theme \
+            -value $theme \
+            -command [list SetTheme $theme]
     }
-
-} else {
-
-    scrollbar .sy -orient vertical -command {vview y}
-    scrollbar .sx -orient horizontal -command {vview x}
-
-    button .buttons.run -text {>} -command {.v start} -width 5
-    button .buttons.pause -text {||} -command {.v pause} -width 5
-    button .buttons.props -text {Properties} -command {.v prop filter} 
-    checkbutton .buttons.stretch -text Stretch -variable stretch \
-        -command onStretch
-
+    proc SetTheme {theme} {
+        global Theme
+        catch {
+            style theme use $theme
+            set Theme $theme
+        }
+    }
+    if {[tk windowingsystem] == "win32"} {
+        SetTheme xpnative
+    }
 }
+
+scrollbar .sy -orient vertical -command {vview y}
+scrollbar .sx -orient horizontal -command {vview x}
+
+button .buttons.run -text {>} -command {.v start} -width 5
+button .buttons.pause -text {||} -command {.v pause} -width 5
+button .buttons.props -text {Properties} -command {.v prop filter} 
+checkbutton .buttons.stretch -text Stretch -variable stretch \
+    -command onStretch
+
 pack .buttons.run .buttons.pause .buttons.props .buttons.stretch -side left
 
 grid .v        .sy   -sticky news
