@@ -4,8 +4,10 @@
 #
 # $Id$
 
-package require Tk
-package require tkvideo
+package require Tk 8
+package require tkvideo 1.1.0
+package require log
+catch {package require Img}
 
 # -------------------------------------------------------------------------
 
@@ -14,8 +16,8 @@ package require tkvideo
 #
 rename ::label ::tk::label
 rename ::radiobutton ::tk::radiobutton
-if {![catch {package require tile 0.4}]} {
-    namespace import -force tile::*
+if {![catch {package require tile 0.5}]} {
+    namespace import -force ttk::*
 } else {
     interp alias {} label {} ::tk::label
     interp alias {} radiobutton {} ::tk::radiobutton
@@ -23,14 +25,16 @@ if {![catch {package require tile 0.4}]} {
 
 # -------------------------------------------------------------------------
 
+variable uid 0
+
 proc sbset {sb args} {
-	puts "$sb set $args"
-	eval [list $sb set] $args
+	#log::log debug "$sb set $args"
+	eval [linsert $args 0 $sb set]
 }
 
 proc vview {dir args} {
-    puts ".v ${dir}view $args"
-	eval [list .v ${dir}view] $args
+    log::log debug ".v ${dir}view $args"
+	eval [linsert $args 0 .v ${dir}view]
 }
 
 proc onStretch {} {
@@ -42,7 +46,8 @@ proc onStretch {} {
 proc onFileOpen {} {
     set file [tk_getOpenFile]
     if {$file != {}} {
-        puts "set source $file"
+        log::log notice "set source $file"
+		.v stop
         .v configure -source [file nativename $file]
     }
 }
@@ -50,11 +55,42 @@ proc onFileOpen {} {
 proc onSource {source} {
     set sources [.v devices]
     set id [lsearch $sources $source]
+	.v stop
     .v configure -source $id
 }
 
 proc onExit {} {
     destroy .
+}
+
+proc Snapshot {w} {
+    set img [$w picture]
+    if {$img ne {}} {
+        variable uid
+        set dlg [toplevel .t[incr uid]]
+        pack [label $dlg.l]
+        tkwait visibility $dlg.l
+        $dlg.l configure -image $img
+    }
+}
+
+proc every {ms body} {eval $body; after $ms [info level 0]}
+
+proc RepeatSnap {w} {
+    if {[package provide Img] eq {}} {
+        tk_messageBox -message "Feature disabled: Img package not available."
+    } else {
+        set file [tk_getSaveFile -title "Snapshot image location"]
+        if {$file != {}} {
+            every 15000 [list RepeatSnapJob $w $file]
+        }
+    }
+}
+
+proc RepeatSnapJob {w filename} {
+    set img [$w snapshot]
+    $img write $filename -format JPEG
+    image delete $img
 }
 
 # -------------------------------------------------------------------------
@@ -75,6 +111,11 @@ frame .buttons
 .menu.file add cascade -label "Video source" -underline 0 \
     -menu [menu .menu.file.sources -tearoff 0]
 .menu.file add separator
+.menu.file add command -label "Snapshot ..." -underline 1 \
+    -command [list Snapshot .v]
+.menu.file add command -label "Repeat snap ..." -underline 0 \
+    -command [list RepeatSnap .v]
+.menu.file add separator
 .menu.file add command -label Exit -underline 1 -command onExit
 
 #
@@ -88,7 +129,7 @@ foreach name [.v devices] {
 
 if {[package provide tile] != {}} {
     .menu add cascade -label "Tk themes" -menu [menu .menu.themes -tearoff 0]
-    foreach theme [style theme names] {
+    foreach theme [tile::availableThemes] {
         .menu.themes add radiobutton -label [string totitle $theme] \
             -variable ::Theme \
             -value $theme \
@@ -97,7 +138,8 @@ if {[package provide tile] != {}} {
     proc SetTheme {theme} {
         global Theme
         catch {
-            style theme use $theme
+            #style theme use $theme
+			tile::setTheme $theme
             set Theme $theme
         }
     }
@@ -109,13 +151,18 @@ if {[package provide tile] != {}} {
 scrollbar .sy -orient vertical -command {vview y}
 scrollbar .sx -orient horizontal -command {vview x}
 
-button .buttons.run -text {>} -command {.v start} -width 5
-button .buttons.pause -text {||} -command {.v pause} -width 5
+font create Btn -family Arial -size 14
+
+button .buttons.run   -text "\u25BA" -width 5 -font Btn -command {.v start}
+button .buttons.pause -text "\u25A1" -width 5 -font Btn -command {.v pause}
+button .buttons.stop  -text "\u25A0" -width 5 -font Btn -command {.v stop}
+button .buttons.snap  -text "\u263A" -width 5 -font Btn -command {Snapshot .v}
 button .buttons.props -text {Properties} -command {.v prop filter} 
 checkbutton .buttons.stretch -text Stretch -variable stretch \
     -command onStretch
 
-pack .buttons.run .buttons.pause .buttons.props .buttons.stretch -side left
+pack .buttons.run .buttons.pause .buttons.stop \
+   .buttons.snap .buttons.props .buttons.stretch -side left
 
 grid .v        .sy   -sticky news
 grid .sx       -     -sticky news
@@ -141,8 +188,10 @@ if {[tk windowingsystem] == "win32"} {
         global console
         if {$console} {console show} else {console hide}
     }
+	
+	bind . <Control-F2> {toggleconsole}
 
     set ndx [.menu.file index end]
     .menu.file insert $ndx checkbutton -label Console -underline 0 \
-        -variable ::console -command toggleconsole 
+        -variable ::console -command toggleconsole -accel "Ctrl-F2"
 }

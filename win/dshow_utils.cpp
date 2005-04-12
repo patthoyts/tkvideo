@@ -368,3 +368,150 @@ LoadFilterGraph(BSTR sFilename, IFilterGraph **ppFilterGraph)
         hr = pFilterGraph.CopyTo(ppFilterGraph);
     return hr;
 }
+
+
+/*
+ * The following is from MSDN knowledge-base article KB230492
+ * http://support.microsoft.com/default.aspx?scid=kb;EN-US;230492
+ */
+
+/**********************************************************
+
+GetOptimalDIBFormat
+
+  Purpose:
+   Retrieves the optimal DIB format for a display 
+   device. The optimal DIB format is the format that 
+   exactly matches the format of the target device. 
+   Obtaining this is very important when dealing with 
+   16bpp modes because you need to know what bitfields 
+   value to use (555 or 565 for example).
+
+   You normally use this function to get the best
+   format to pass to CreateDIBSection() in order to
+   maximize blt'ing performance.
+
+  Input:
+   hdc - Device to get the optimal format for.
+   pbi - Pointer to a BITMAPINFO + color table
+         (room for 256 colors is assumed).
+
+  Output:
+   pbi - Contains the optimal DIB format. In the 
+         <= 8bpp case, the color table will contain the 
+         system palette. In the >=16bpp case, the "color 
+         table" will contain the correct bit fields (see 
+         BI_BITFIELDS in the Platform SDK documentation 
+         for more information).
+
+  Notes:
+   If you are going to use this function on a 8bpp device
+   you should make sure the color table contains a identity
+   palette for optimal blt'ing.
+
+**********************************************************/ 
+static BOOL 
+GetOptimalDIBFormat(HDC hdc, BITMAPINFOHEADER *pbi)
+{
+    HBITMAP hbm;
+    BOOL bRet = TRUE;
+    
+    // Create a memory bitmap that is compatible with the
+    // format of the target device.
+    hbm = CreateCompatibleBitmap(hdc, 1, 1);
+    if (!hbm)
+        return FALSE;
+    
+    // Initialize the header.
+    ZeroMemory(pbi, sizeof(BITMAPINFOHEADER));
+    pbi->biSize = sizeof(BITMAPINFOHEADER);
+
+    // First call to GetDIBits will fill in the optimal biBitCount.
+    bRet = GetDIBits(hdc, hbm, 0, 1, NULL, (BITMAPINFO*)pbi, DIB_RGB_COLORS);
+    
+    // Second call to GetDIBits will get the optimal color table, o
+    // or the optimal bitfields values.
+    if (bRet)
+        bRet = GetDIBits(hdc, hbm, 0, 1, NULL, (BITMAPINFO*)pbi, DIB_RGB_COLORS);
+    
+    // Clean up.
+    DeleteObject(hbm);
+
+    return bRet;
+}
+
+// Counts the number of set bits in a DWORD.
+static BYTE 
+CountBits(DWORD dw)
+{
+    int iBits = 0;
+    
+    while (dw) {
+        iBits += (dw & 1);
+        dw >>= 1;
+    }
+    
+    return iBits;
+}
+
+/**********************************************************
+
+GetRGBBitsPerPixel
+
+  Purpose:
+   Retrieves the number of bits of color resolution for each 
+   color channel of a specified.
+
+  Input:
+   hdc - Device to get the color information for.
+   
+  Output:
+   pRed   - Number of distinct red levels the device can display.
+   pGreen - Number of distinct green levels the device can display.
+   pBlue  - Number of distinct blue levels the device can display.
+
+  Notes:
+   This function does not return any meaningful information for
+   palette-based devices.
+
+**********************************************************/ 
+BOOL 
+GetRGBBitsPerPixel(HDC hdc, PINT pRed, PINT pGreen, PINT pBlue)
+{
+    BITMAPINFOHEADER *pbi;
+    LPDWORD lpdw;
+    BOOL bRet = TRUE;
+
+    // If the target device is palette-based, then bail because there is no
+    // meaningful way to determine separate RGB bits per pixel.
+    if (GetDeviceCaps(hdc, RASTERCAPS) & RC_PALETTE) 
+        return FALSE;  
+
+    // Shortcut for handling 24bpp cases.
+    if (GetDeviceCaps(hdc, PLANES) * GetDeviceCaps(hdc, BITSPIXEL) == 24) {
+        *pRed = *pGreen = *pBlue = 8;
+        return TRUE;
+    }
+   
+    // Allocate room for a header and a color table.
+    pbi = (BITMAPINFOHEADER *)GlobalAlloc(GPTR, sizeof(BITMAPINFOHEADER) + 
+                                                sizeof(RGBQUAD)*256);
+    if (!pbi)
+        return FALSE;
+
+    // Retrieve a description of the device surface.
+    if (GetOptimalDIBFormat(hdc, pbi)) {
+        // Get a pointer to the bitfields.
+        lpdw = (LPDWORD)((LPBYTE)pbi + sizeof(BITMAPINFOHEADER));
+
+        *pRed   = CountBits(lpdw[0]);
+        *pGreen = CountBits(lpdw[1]);
+        *pBlue  = CountBits(lpdw[2]);
+    } else
+        bRet = FALSE;
+    
+    // Clean up.
+    GlobalFree(pbi);
+
+    return bRet;
+}

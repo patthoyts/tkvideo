@@ -1,18 +1,115 @@
-[manpage_begin tkvideo n 1.0.0]
+[manpage_begin tkvideo n 1.1.0]
 [copyright {2004, Pat Thoyts}]
+[comment {link rel="stylesheet" href="manpage.css" type="text/css"}]
 [moddesc   {tkvideo}]
 [titledesc {Tk video widget}]
 [require Tk 8.4]
-[require tkvideo [opt 1.0.0]]
+[require tkvideo [opt 1.1.0]]
 [description]
 [para]
 
+This package provides a Tk widget that can display video streams from
+streaming video sources or from files. At this time the package only
+supports DirectShow sources on Windows. It should be possible to
+extend the backend in the future to support other platforms.
 
-[section COMMANDS]
+[section "COMMANDS"]
 
 [list_begin definitions]
 
-[call [cmd "tkvideo"] [arg "pathname"] [opt [arg "?options ...?"]]]
+[call [cmd "tkvideo"] [arg "pathName"] [opt "[arg \"option\"] [arg \"value\"] \"...\""]]
+
+Create a new instance of a video widget and configures it using the
+provides options and their values.
+
+[list_end]
+
+[section "WIDGET COMMANDS"]
+[list_begin definitions]
+
+[call [arg "pathName"] [method "cget"]]
+
+Returns information about the current configuration of the widget, for
+the specified option. For options and their meaning see the widget
+options section.
+
+[call [arg "pathName"] [method "configure"] [arg "option"] [arg "value"] "..."]
+
+Modifies the configuration of the widget. For options and
+their meaning see the widget options section.
+
+[call [arg "pathName"] [method "xview"]]
+
+This command is used to query and change the horizontal position of
+the information in the widget's window.
+
+[call [arg "pathName"] [method "yview"]]
+
+This command is used to query and change the vertical position of
+the information in the widget's window
+
+[call [arg "pathName"] [method "propertypage"] [lb] [arg "filter"] | [arg "pin"] [rb]]
+
+This command shows the DirectShow property pages for the video
+source. There may not be a property page to show, in which case
+nothing happens. For camera sources it is usually possible to
+configure the device with these pages. The [arg filter] page is the
+device driver page while the [arg pin] page is a lower level
+DirectShow page.
+
+[call [arg "pathName"] [method "start"]]
+
+Start streaming the video source. For a file based source this will
+start at the beginning of the stream. For camera sources the video
+becomes live.
+
+[call [arg "pathName"] [method "pause"]]
+
+Pause the video stream.
+
+[call [arg "pathName"] [method "stop"]]
+
+Stop the stream.
+
+[call [arg "pathName"] [method "devices"]]
+
+Returns a list of available input devices. An index into this list
+should be specified for use with the [arg -source] configuration
+option.
+
+[call [arg "pathName"] [method "picture"] [opt [arg "imagename"]]]
+
+Capture a photo image from the video stream. The image name may be
+specified. If no name is provided then an automatic name is provided
+using the normal "image photo create" command. The command returns the
+name of the Tk image created.
+
+[list_end]
+
+
+[section "STANDARD WIDGET OPTIONS"]
+[list_begin tkoption]
+
+[tkoption_def -background background Background]
+[tkoption_def -cursor cursor Cursor]
+[tkoption_def -height height Height]
+[tkoption_def -takefocus takeFocus TakeFocus]
+[tkoption_def -width width Width]
+[tkoption_def -xscrollcommand xScrollCommand ScrollCommand]
+[tkoption_def -yscrollcommand yScrollCommand ScrollCommand]
+[list_end]
+
+[section "WIDGET-SPECIFIC OPTIONS"]
+[list_begin tkoption]
+
+[tkoption_def -source source Source]
+
+This option sets the index of the device to use as a source or may be
+set to the filename of a file source.
+
+[tkoption_def -stretch stretch Stretch]
+
+I forget.
 
 [list_end]
 

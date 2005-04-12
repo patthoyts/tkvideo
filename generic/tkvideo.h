@@ -1,3 +1,8 @@
+/* tkvideo.h - Copyright (C) 2005 Pat Thoyts <patthoyts@users.sourceforge.net>
+ *
+ * $Id$
+ */
+
 #ifndef _tkvideo_h_INCLUDE
 #define _tkvideo_h_INCLUDE
 
@@ -39,13 +44,16 @@ typedef struct {
 
     Tcl_Obj *sourcePtr;
 
+    Tk_Cursor cursor;      /* support alternate cursor */
+    Tcl_Obj *takeFocusPtr; /* used for keyboard traversal */
+
     ClientData platformData;
 
 } Video;
 
 enum {
     VIDEO_CGET, VIDEO_CONFIGURE, VIDEO_XVIEW, VIDEO_YVIEW, VIDEO_PROPERTYPAGE,
-    VIDEO_STOP, VIDEO_START, VIDEO_PAUSE, VIDEO_DEVICES,
+    VIDEO_STOP, VIDEO_START, VIDEO_PAUSE, VIDEO_DEVICES, VIDEO_PICTURE
 };
 
 int  VideopInit(Tcl_Interp *interp);

@@ -21,5 +21,6 @@ HRESULT RegisterFilterGraph(IFilterGraph *pFilterGraph, DWORD *lpdwCookie);
 HRESULT UnregisterFilterGraph(DWORD dwCookie);
 HRESULT SaveFilterGraph(IFilterGraph *pFilterGraph, BSTR sFilename);
 HRESULT LoadFilterGraph(BSTR sFilename, IFilterGraph **ppFilterGraph);
+BOOL    GetRGBBitsPerPixel(HDC hdc, PINT pRed, PINT pGreen, PINT pBlue);
 
 #endif // _DSHOW_UTILS_H_INCLUDE

@@ -21,7 +21,7 @@
 # RCS: @(#)$Id: makefile.vc,v 1.2 2003/12/19 16:07:15 pat Exp $
 #-------------------------------------------------------------------------
 
-!if "$(MSVCDIR)" == ""
+!if !defined(MSDEVDIR) && !defined(MSVCDIR) && !defined(VCToolkitInstallDir)
 MSG = ^
 You will need to run vcvars32.bat from Developer Studio, first, to setup^
 the environment.  Jump to this line to read the new instructions.
@@ -160,7 +160,7 @@ Please `cd` to its location first.
 PROJECT = tkvideo
 !include "rules.vc"
 
-DOTVERSION      = 1.0.0
+DOTVERSION      = 1.1.0
 VERSION         = $(DOTVERSION:.=)
 STUBPREFIX      = $(PROJECT)stub
 
@@ -198,11 +198,13 @@ PRJSTUBLIBNAME	= $(STUBPREFIX)$(VERSION).lib
 PRJSTUBLIB	= $(OUT_DIR)\$(PRJSTUBLIBNAME)
 
 ### Make sure we use backslash only.
-LIB_INSTALL_DIR		= $(_INSTALLDIR)\lib
-BIN_INSTALL_DIR		= $(_INSTALLDIR)\bin
-DOC_INSTALL_DIR		= $(_INSTALLDIR)\doc
-SCRIPT_INSTALL_DIR	= $(_INSTALLDIR)\lib\$(PROJECT)$(DOTVERSION)
-INCLUDE_INSTALL_DIR	= $(_INSTALLDIR)\include
+PRJ_INSTALL_DIR         = $(_INSTALLDIR)\$(PROJECT)$(DOTVERSION)
+LIB_INSTALL_DIR		= $(PRJ_INSTALL_DIR)
+BIN_INSTALL_DIR		= $(PRJ_INSTALL_DIR)
+DOC_INSTALL_DIR		= $(PRJ_INSTALL_DIR)
+SCRIPT_INSTALL_DIR	= $(PRJ_INSTALL_DIR)
+DEMO_INSTALL_DIR	= $(PRJ_INSTALL_DIR)
+INCLUDE_INSTALL_DIR	= $(_TCLDIR)\include
 
 ### The following paths CANNOT have spaces in them.
 GENERICDIR	= $(ROOT)\generic
@@ -211,14 +213,7 @@ LIBDIR          = $(ROOT)\library
 DOCDIR		= $(ROOT)\doc
 TOOLSDIR	= $(ROOT)\tools
 COMPATDIR	= $(ROOT)\compat
-
-### Find a tclsh and wish for testing and installation.
-!if !exist("$(TCLSH)")
-TCLSH           = $(BIN_INSTALL_DIR)\tclsh$(TCL_VERSION).exe
-!endif
-!if !exist("$(WISH)")
-WISH           = $(BIN_INSTALL_DIR)\wish$(TCL_VERSION).exe
-!endif
+DEMODIR 	= $(ROOT)\demos
 
 #---------------------------------------------------------------------
 # Compile flags
@@ -233,9 +228,9 @@ cdebug	=
 !endif
 !else if "$(MACHINE)" == "IA64"
 ### Warnings are too many, can't support warnings into errors.
-cdebug	= -Z7 -Od
+cdebug	= -Z7 -Od -GZ
 !else
-cdebug	= -Z7 -WX -Od
+cdebug	= -Z7 -WX -Od -GZ
 !endif
 
 ### Declarations common to all compiler options
@@ -318,7 +313,7 @@ TESTFLAGS = -file $(TESTPAT)
 
 all:	    setup $(PROJECT)
 $(PROJECT): setup $(PRJLIB)
-install:    install-binaries install-libraries install-docs
+install:    install-binaries install-libraries install-demos install-docs
 
 
 test: setup $(PROJECT)
@@ -405,8 +400,18 @@ $<
 !endif
 	$<
 
+{$(DOCDIR)}.man{$(DOCDIR)}.html:
+	mpexpand html $< $@
+        @set TCL_LIBRARY=$(ROOT)/library
+        @$(TCLSH) <<
+set name $(@:\=/)
+set f [open $$name r]; set d [read $$f]; close $$f
+set d [regsub {</head>} $$d {<link rel="stylesheet" href="manpage.css" type="text/css"></head>}]
+set f [open $$name w]; puts -nonewline $$f $$d; close $$f
+<<
+
 .SUFFIXES:
-.SUFFIXES:.c .rc .cpp
+.SUFFIXES:.c .rc .cpp .man
 
 #---------------------------------------------------------------------
 # Installation. (EDIT)
@@ -417,17 +422,31 @@ $<
 #---------------------------------------------------------------------
 
 install-binaries:
-	@echo Installing to '$(SCRIPT_INSTALL_DIR)'
-	@if not exist $(SCRIPT_INSTALL_DIR)\nul mkdir $(SCRIPT_INSTALL_DIR)
-	$(CPY) $(PRJLIB) $(SCRIPT_INSTALL_DIR)
+	@echo Installing binaries to '$(SCRIPT_INSTALL_DIR)'
+	@if not exist "$(SCRIPT_INSTALL_DIR)" mkdir "$(SCRIPT_INSTALL_DIR)"
+	@$(CPY) $(PRJLIB) "$(SCRIPT_INSTALL_DIR)" >NUL
 
 install-libraries:
-	@echo Installing to '$(SCRIPT_INSTALL_DIR)'
-	@if exist $(LIBDIR)\nul $(CPY) $(LIBDIR)\*.tcl $(SCRIPT_INSTALL_DIR)
-	@cd $(SCRIPT_INSTALL_DIR)
-	@echo pkg_mkIndex -verbose . | $(TCLSH)
+	@echo Installing libraries to '$(SCRIPT_INSTALL_DIR)'
+	@if exist $(LIBDIR)\nul $(CPY) $(LIBDIR)\*.tcl "$(SCRIPT_INSTALL_DIR)" >NUL
+	@echo Installing package index in '$(SCRIPT_INSTALL_DIR)'
+	@type << >"$(SCRIPT_INSTALL_DIR)\pkgIndex.tcl"
+# tkvideo pkgIndex
+if {[info exists ::tcl_platform(debug)]} {
+   package ifneeded $(PROJECT) $(DOTVERSION) [list load [file join $$dir $(PROJECT)$(VERSION)g.$(EXT)]]
+} else {
+   package ifneeded $(PROJECT) $(DOTVERSION) [list load [file join $$dir $(PROJECT)$(VERSION).$(EXT)]]
+}
+<<
+
+install-demos:
+	@echo Installing demo files to '$(DEMO_INSTALL_DIR)'
+	@if exist $(DEMODIR)\nul $(CPY) $(DEMODIR)\*.tcl $(DEMO_INSTALL_DIR) >NUL
 
 install-docs:
+	@echo Installing documentation files to '$(DOC_INSTALL_DIR)'
+	@if exist $(DOCDIR) $(CPY) $(DOCDIR)\*.html "$(DOC_INSTALL_DIR)" >NUL
+	@if exist $(DOCDIR) $(CPY) $(DOCDIR)\*.css "$(DOC_INSTALL_DIR)" >NUL
 
 #---------------------------------------------------------------------
 # Clean up

@@ -11,6 +11,7 @@
  *
  *                 ---  THIS IS C++ ---
  *
+ * $Id$
  */
 
 #define WIN32_LEAN_AND_MEAN
@@ -33,6 +34,7 @@ static HRESULT ConnectVideo(IGraphBuilder *pGraphBuilder, HWND hwnd, IVideoWindo
 static HRESULT GetVideoSize(IGraphBuilder *pFilterGraph, long *pWidth, long *pHeight);
 static HRESULT DisconnectFilterGraph(IFilterGraph *pFilterGraph);
 static HRESULT DisconnectPins(IBaseFilter *pFilter);
+static int GrabSample(Tcl_Interp *interp, IGraphBuilder *pFilterGraph, LPCSTR imageName);
 static int GetDeviceList(Tcl_Interp *interp);
 
 typedef struct {
@@ -108,8 +110,6 @@ InitVideoSource(Video *videoPtr)
 		CComPtr<IMediaControl> pMediaControl;
 		hr = pPlatformData->pFilterGraph->QueryInterface(IID_IMediaControl,
 		    reinterpret_cast<void**>(&pMediaControl));
-		//if (SUCCEEDED(hr))
-		//    hr = pMediaControl->Run();
 	    }
 
 	    long w, h;
@@ -211,15 +211,24 @@ VideopWidgetObjCmd(ClientData clientData, Tcl_Interp *interp,
 
 	CComPtr<IMediaControl> pMediaControl;
 	CComPtr<IVideoWindow>  pVideoWindow;
+	CComPtr<IBaseFilter> pGrabberFilter;
+	CComPtr<ISampleGrabber> pSampleGrabber;
 	HRESULT hr = pFilterGraph->QueryInterface(IID_IMediaControl, reinterpret_cast<void**>(&pMediaControl));
 	if (SUCCEEDED(hr))
 	    hr = pFilterGraph->QueryInterface(IID_IVideoWindow, reinterpret_cast<void**>(&pVideoWindow));
+	if (SUCCEEDED(hr))
+	    hr = pFilterGraph->FindFilterByName(SAMPLE_GRABBER_NAME, &pGrabberFilter);
+	if (SUCCEEDED(hr))
+	    hr = pGrabberFilter.QueryInterface(&pSampleGrabber);
+
 	if (SUCCEEDED(hr)) {
 	    switch (index) {
 	    case VIDEO_START:
 		hr = pMediaControl->Run();
 		if (SUCCEEDED(hr))
 		    hr = pVideoWindow->put_Visible(OATRUE);
+		if (SUCCEEDED(hr))
+		    hr = pSampleGrabber->SetBufferSamples(TRUE);
 		break;
 	    case VIDEO_PAUSE:
 		hr = pMediaControl->Pause();
@@ -231,6 +240,8 @@ VideopWidgetObjCmd(ClientData clientData, Tcl_Interp *interp,
 		hr = pMediaControl->Stop();
 		if (SUCCEEDED(hr))
 		    pVideoWindow->put_Visible(OAFALSE);
+		if (SUCCEEDED(hr))
+		    hr = pSampleGrabber->SetBufferSamples(FALSE);
 		break;		
 	    }
 	}
@@ -238,10 +249,30 @@ VideopWidgetObjCmd(ClientData clientData, Tcl_Interp *interp,
 	break;
     }
 
+    case VIDEO_PICTURE: 
+    {
+	if (objc < 2 || objc > 3) {
+	    Tcl_WrongNumArgs(interp, 2, objv, "?imagename?");
+	    r = TCL_ERROR;
+	} else {
+	    pFilterGraph = pPlatformData->pFilterGraph;
+	    if (! pFilterGraph) {
+		Tcl_SetObjResult(interp, Tcl_NewStringObj("error: no video source initialized", -1));
+		return TCL_ERROR;
+	    }
+	    const char *imageName = NULL;
+	    if (objc == 3)
+		imageName = Tcl_GetString(objv[2]);
+	    r = GrabSample(interp, pFilterGraph, imageName);
+	}
+	break;
+    }
+
     default:
 	Tcl_WrongNumArgs(interp, 1, objv, "option ?arg arg ...?");
 	r = TCL_ERROR;
     }
+
     return r;
 }
 
@@ -352,13 +383,23 @@ ConstructFileGraph(LPOLESTR sFilename, IGraphBuilder **ppGraphBuilder)
 	AM_MEDIA_TYPE mt;
 	ZeroMemory(&mt, sizeof(AM_MEDIA_TYPE));
 	mt.majortype = MEDIATYPE_Video;
-	int iBitDepth = GetDeviceCaps(::GetDC(HWND_DESKTOP), BITSPIXEL);
+	HDC hdc = ::GetDC(HWND_DESKTOP);
+	int iBitDepth = GetDeviceCaps(hdc, BITSPIXEL);
+
 	switch (iBitDepth) {
 	case  8: mt.subtype = MEDIASUBTYPE_RGB8;   break;
 	case 24: mt.subtype = MEDIASUBTYPE_RGB24;  break;
 	case 32: mt.subtype = MEDIASUBTYPE_RGB32;  break;
-	default: mt.subtype = MEDIASUBTYPE_RGB555; break;
+	case 16: {
+		int r = 0, g = 0, b = 0;
+		mt.subtype = MEDIASUBTYPE_RGB565;
+		if (GetRGBBitsPerPixel(hdc, &r, &g, &b) && g == 5)
+		    mt.subtype = MEDIASUBTYPE_RGB555;
+	    }
+	    break;
+	default: mt.subtype = MEDIASUBTYPE_RGB24; break;
 	}
+	::ReleaseDC(HWND_DESKTOP, hdc);
 
 	CComQIPtr<ISampleGrabber> pSampleGrabber(pGrabberFilter);
 	if (pSampleGrabber)
@@ -503,14 +544,22 @@ ConnectFilterGraph(IGraphBuilder *pGraphBuilder,
     mt.majortype = MEDIATYPE_Video;
     HDC hdc = ::GetDC(HWND_DESKTOP);
     int iBitDepth = GetDeviceCaps(hdc, BITSPIXEL);
-    ::ReleaseDC(HWND_DESKTOP, hdc);
 
     switch (iBitDepth) {
     case  8: mt.subtype = MEDIASUBTYPE_RGB8;   break;
     case 24: mt.subtype = MEDIASUBTYPE_RGB24;  break;
     case 32: mt.subtype = MEDIASUBTYPE_RGB32;  break;
-    default: mt.subtype = MEDIASUBTYPE_RGB565; break;
+    case 16:
+	{
+	    int r = 0, g = 0, b = 0;
+	    mt.subtype = MEDIASUBTYPE_RGB565;
+	    if (GetRGBBitsPerPixel(hdc, &r, &g, &b) && g == 5)
+		mt.subtype = MEDIASUBTYPE_RGB555;
+	}
+	break;
+    default: mt.subtype = MEDIASUBTYPE_RGB24; break;
     }
+    ::ReleaseDC(HWND_DESKTOP, hdc);
 
     CComPtr<IPin> pCapturePin, pRenderPin, pGrabIn, pGrabOut;
     if (SUCCEEDED(hr))
@@ -664,4 +713,121 @@ DisconnectPins(IBaseFilter *pFilter)
         }
     }
     return hr;
+}
+
+/*
+ * Take an image snapshot from the sample grabber and create a
+ * Tk photo using the returned data.
+ */
+
+int
+GrabSample(Tcl_Interp *interp, IGraphBuilder *pFilterGraph, LPCSTR imageName)
+{
+    CComPtr<IBaseFilter> pGrabberFilter;
+    CComPtr<ISampleGrabber> pSampleGrabber;
+    int r = TCL_OK;
+
+    HRESULT hr = pFilterGraph->FindFilterByName(SAMPLE_GRABBER_NAME, &pGrabberFilter);
+    if (SUCCEEDED(hr))
+	hr = pGrabberFilter.QueryInterface(&pSampleGrabber);
+
+    AM_MEDIA_TYPE mt;
+    ZeroMemory(&mt, sizeof(AM_MEDIA_TYPE));
+
+    if (SUCCEEDED(hr))
+	hr = pSampleGrabber->GetConnectedMediaType(&mt);
+
+    // Copy the bitmap info from the media type structure
+    VIDEOINFOHEADER *pvih = reinterpret_cast<VIDEOINFOHEADER *>(mt.pbFormat);
+    BITMAPINFOHEADER bih;
+    if (SUCCEEDED(hr))
+    {
+	ZeroMemory(&bih, sizeof(BITMAPINFOHEADER));
+	CopyMemory(&bih, &pvih->bmiHeader, sizeof(BITMAPINFOHEADER));
+	if (mt.cbFormat > 0)
+	    CoTaskMemFree(mt.pbFormat);
+    }
+
+    // Get the image data - first finding out how much space to allocate.
+    // Copy the image into the buffer.
+    long cbData = 0;
+    LPBYTE pData = NULL;
+    if (SUCCEEDED(hr))
+	hr = pSampleGrabber->GetCurrentBuffer(&cbData, NULL);
+    if (SUCCEEDED(hr))
+    {
+	pData = new BYTE[cbData];
+	hr = pSampleGrabber->GetCurrentBuffer(&cbData, reinterpret_cast<long*>(pData));
+	if (SUCCEEDED(hr))
+	{
+	    // Create a photo image.
+	    //image create photo -height n -width
+	    Tcl_Obj *objv[8];
+	    int      ndx = 0;
+	    objv[ndx++] = Tcl_NewStringObj("image", -1);
+	    objv[ndx++] = Tcl_NewStringObj("create", -1);
+	    objv[ndx++] = Tcl_NewStringObj("photo", -1);
+	    if (imageName != NULL)
+		objv[ndx++] = Tcl_NewStringObj(imageName, -1);
+	    objv[ndx++] = Tcl_NewStringObj("-height", -1);
+	    objv[ndx++] = Tcl_NewLongObj(bih.biHeight);
+	    objv[ndx++] = Tcl_NewStringObj("-width", -1);
+	    objv[ndx++] = Tcl_NewLongObj(bih.biWidth);
+	    r = Tcl_EvalObjv(interp, ndx, objv, 0);
+	    if (r == TCL_OK) {
+		imageName = Tcl_GetStringResult(interp);
+		Tk_PhotoHandle img = Tk_FindPhoto(interp, imageName);
+		Tk_PhotoImageBlock block;
+
+		Tk_PhotoBlank(img);
+		block.width = bih.biWidth;
+		block.height = bih.biHeight;
+		// hard coding for 24/32 bit bitmaps.
+		block.pixelSize = bih.biBitCount / 8;
+		block.pitch  = block.pixelSize * block.width;
+		block.offset[0] = 2;  /* R */
+		block.offset[1] = 1;  /* G */
+		block.offset[2] = 0;  /* B */
+#if TK_MINOR_VERSION >= 3
+		block.offset[3] = 3;
+#endif
+		block.pixelPtr = pData;
+
+#if TK_MINOR_VERSION >= 3
+		// We have to fix the alpha channel. By default it is undefined and tends to
+		// produce a transparent image.
+		for (LPBYTE p = block.pixelPtr; p < block.pixelPtr+cbData; p += block.pixelSize)
+		    *(p + block.offset[3]) = 0xff;
+#endif
+
+		// If biHeight is positive the bitmap is a bottom-up DIB.
+		if (bih.biHeight > 0)
+                {
+		    DWORD cbRow = block.pitch;
+		    LPBYTE pTmp = new BYTE[cbRow];
+		    for (int i = 0; i < block.height/2; i++)
+		    {
+			LPBYTE pTop = block.pixelPtr + (i * cbRow);
+			LPBYTE pBot = block.pixelPtr + ((block.height - i - 1) * cbRow);
+			CopyMemory(pTmp, pBot, cbRow);
+			CopyMemory(pBot, pTop, cbRow);
+			CopyMemory(pTop, pTmp, cbRow);
+		    }
+		}
+
+		Tk_PhotoPutBlock(
+#if TK_MAJOR_VERSION >= 8 && TK_MINOR_VERSION >= 5
+				 interp,
+#endif
+				 img, &block,
+				 0, 0, bih.biWidth, bih.biHeight, TK_PHOTO_COMPOSITE_SET);
+	    }	
+	}
+    }
+    if (FAILED(hr)) {
+	Tcl_SetResult(interp, "argh!", TCL_STATIC);
+	r = TCL_ERROR;
+    }
+
+    return r;
 }

@@ -1,3 +1,9 @@
+/* tkvideo.c - Copyright (C) 2005 Pat Thoyts <patthoyts@users.sourceforge.net>
+ *
+ *
+ * $Id$
+ */
+
 #include "tkvideo.h"
 #include <stdio.h>
 
@@ -8,6 +14,8 @@
 #define DEF_VIDEO_SOURCE       ""
 #define DEF_VIDEO_SCROLL_CMD   ""
 #define DEF_VIDEO_STRETCH      "0"
+#define DEF_VIDEO_CURSOR       ""
+#define DEF_VIDEO_TAKE_FOCUS   "0"
 
 #define VIDEO_SOURCE_CHANGED   0x01
 #define VIDEO_GEOMETRY_CHANGED 0x02
@@ -31,6 +39,12 @@ static Tk_OptionSpec videoOptionSpec[] = {
 	TK_OPTION_NULL_OK, 0, 0},
     {TK_OPTION_BOOLEAN, "-stretch", "stretch", "Stretch",
 	DEF_VIDEO_STRETCH, -1, Tk_Offset(Video, stretch), 0, 0, 0 },
+    {TK_OPTION_CURSOR, "-cursor", "cursor", "Cursor",
+	DEF_VIDEO_CURSOR, -1, Tk_Offset(Video, cursor),
+	TK_OPTION_NULL_OK, 0, 0},
+    {TK_OPTION_STRING, "-takefocus", "takeFocus", "TakeFocus",
+	DEF_VIDEO_TAKE_FOCUS, Tk_Offset(Video, takeFocusPtr), -1,
+	TK_OPTION_NULL_OK, 0, 0},
     {TK_OPTION_END, (char *)NULL, (char *)NULL, (char*)NULL,
 	(char *)NULL, 0, 0, 0, 0}
 };
@@ -82,7 +96,7 @@ Tkvideo_Init(Tcl_Interp *interp)
     r = VideopInit(interp);
     if (r == TCL_OK) {
 	Tcl_CreateObjCommand(interp, "tkvideo", VideoObjCmd, NULL, NULL);
-	r = Tcl_PkgProvide(interp, "tkvideo", "1.0.0"); 
+	r = Tcl_PkgProvide(interp, "tkvideo", VERSION); 
     }
     return r;
 }
@@ -126,6 +140,8 @@ VideoObjCmd(ClientData clientData, Tcl_Interp *interp,
     videoPtr->platformData = (ClientData)NULL;
     videoPtr->offset.x = 0;
     videoPtr->offset.y = 0;
+    videoPtr->cursor = None;
+    videoPtr->takeFocusPtr = NULL;
 
     if (Tk_InitOptions(interp, (char *)videoPtr, optionTable, tkwin) 
 	!= TCL_OK) {
@@ -162,7 +178,8 @@ VideoWidgetObjCmd(ClientData clientData, Tcl_Interp *interp,
     
     static CONST84 char *options[] = {
 	"cget", "configure", "xview", "yview", "propertypage",
-	"stop", "start", "pause", "devices", (char *)NULL
+	"stop", "start", "pause", "devices", "picture",
+	(char *)NULL
     };
 
     if (objc < 2) {
