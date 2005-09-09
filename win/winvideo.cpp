@@ -54,9 +54,9 @@ VideopCreateWidget(Video *videoPtr)
 {
     videoPtr->platformData = (ClientData)ckalloc(sizeof(VideoPlatformData));
     if (videoPtr->platformData != NULL) {
-	memset(videoPtr->platformData, 0, sizeof(VideoPlatformData));
+        memset(videoPtr->platformData, 0, sizeof(VideoPlatformData));
     } else {
-	Tcl_Panic("out of memory");
+        Tcl_Panic("out of memory");
     }
     return TCL_OK;
 }
@@ -66,15 +66,15 @@ VideopDestroy(char *memPtr)
 {
     Video *videoPtr = (Video *)memPtr;
     if (videoPtr->platformData != NULL) {
-	VideoPlatformData *p = (VideoPlatformData *)videoPtr->platformData;
-	if (p->pFilterGraph != NULL) {
-	    UnregisterFilterGraph(p->dwRegistrationId);
-	    p->pFilterGraph->Release();
-	    p->pFilterGraph = NULL;
-	}
+        VideoPlatformData *p = (VideoPlatformData *)videoPtr->platformData;
+        if (p->pFilterGraph != NULL) {
+            UnregisterFilterGraph(p->dwRegistrationId);
+            p->pFilterGraph->Release();
+            p->pFilterGraph = NULL;
+        }
 
-	ckfree((char *)videoPtr->platformData);
-	videoPtr->platformData = NULL;
+        ckfree((char *)videoPtr->platformData);
+        videoPtr->platformData = NULL;
     }
 }
 
@@ -88,43 +88,43 @@ InitVideoSource(Video *videoPtr)
 
 
     if (pPlatformData->pFilterGraph) {
-	UnregisterFilterGraph(pPlatformData->dwRegistrationId);
-	pPlatformData->pFilterGraph->Release();
-	pPlatformData->pFilterGraph = NULL;
+        UnregisterFilterGraph(pPlatformData->dwRegistrationId);
+        pPlatformData->pFilterGraph->Release();
+        pPlatformData->pFilterGraph = NULL;
     }
 
     if (Tcl_GetIntFromObj(NULL, videoPtr->sourcePtr, &device) == TCL_OK) {
-	hr = ConstructCaptureGraph(device, &pPlatformData->pFilterGraph);
+        hr = ConstructCaptureGraph(device, &pPlatformData->pFilterGraph);
     } else {
-	hr = ConstructFileGraph(Tcl_GetUnicode(videoPtr->sourcePtr), &pPlatformData->pFilterGraph);
+        hr = ConstructFileGraph(Tcl_GetUnicode(videoPtr->sourcePtr), &pPlatformData->pFilterGraph);
     }
 
     if (SUCCEEDED(hr)) {
-	RegisterFilterGraph(pPlatformData->pFilterGraph, &pPlatformData->dwRegistrationId);
+        RegisterFilterGraph(pPlatformData->pFilterGraph, &pPlatformData->dwRegistrationId);
 
-	hr = ConnectVideo(pPlatformData->pFilterGraph,
-	    Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)), &pVideoWindow);
-	if (SUCCEEDED(hr)) {
+        hr = ConnectVideo(pPlatformData->pFilterGraph,
+            Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)), &pVideoWindow);
+        if (SUCCEEDED(hr)) {
 
-	    if (SUCCEEDED(hr)) {
-		CComPtr<IMediaControl> pMediaControl;
-		hr = pPlatformData->pFilterGraph->QueryInterface(IID_IMediaControl,
-		    reinterpret_cast<void**>(&pMediaControl));
-	    }
+            if (SUCCEEDED(hr)) {
+                CComPtr<IMediaControl> pMediaControl;
+                hr = pPlatformData->pFilterGraph->QueryInterface(IID_IMediaControl,
+                    reinterpret_cast<void**>(&pMediaControl));
+            }
 
-	    long w, h;
-	    hr = GetVideoSize(pPlatformData->pFilterGraph, &w, &h);
+            long w, h;
+            hr = GetVideoSize(pPlatformData->pFilterGraph, &w, &h);
 
-	    pVideoWindow->put_BorderColor(0xffffff);
+            pVideoWindow->put_BorderColor(0xffffff);
 
-	    // /* FIX ME */
-	    //pVideoWindow->put_Width(w);
-	    //pVideoWindow->put_Height(h);
+            // /* FIX ME */
+            //pVideoWindow->put_Width(w);
+            //pVideoWindow->put_Height(h);
 
-	    videoPtr->videoHeight = h;
-	    videoPtr->videoWidth = w;
-	    pVideoWindow->Release();
-	}
+            videoPtr->videoHeight = h;
+            videoPtr->videoWidth = w;
+            pVideoWindow->Release();
+        }
     }
 
     return TCL_OK;
@@ -137,29 +137,29 @@ VideopCalculateGeometry(Video *videoPtr)
     int width, height;
 
     if (videoPtr->stretch) {
-	width = Tk_ReqWidth(videoPtr->tkwin);
-	height = Tk_ReqHeight(videoPtr->tkwin);
+        width = Tk_ReqWidth(videoPtr->tkwin);
+        height = Tk_ReqHeight(videoPtr->tkwin);
     } else {
-	width = videoPtr->videoWidth;
-	height = videoPtr->videoHeight;
+        width = videoPtr->videoWidth;
+        height = videoPtr->videoHeight;
     }
 
     if (pPlatformData && pPlatformData->pFilterGraph) {
-	CComPtr<IVideoWindow> pVideoWindow;
-	if (SUCCEEDED( pPlatformData->pFilterGraph->QueryInterface(&pVideoWindow) )) {
-	    pVideoWindow->put_Width(width);
-	    pVideoWindow->put_Height(height);
-	    if (videoPtr->offset.x > 0)
-		pVideoWindow->put_Left(-videoPtr->offset.x);
-	    if (videoPtr->offset.y > 0)
-		pVideoWindow->put_Top(-videoPtr->offset.y);
-	}
+        CComPtr<IVideoWindow> pVideoWindow;
+        if (SUCCEEDED( pPlatformData->pFilterGraph->QueryInterface(&pVideoWindow) )) {
+            pVideoWindow->put_Width(width);
+            pVideoWindow->put_Height(height);
+            if (videoPtr->offset.x > 0)
+                pVideoWindow->put_Left(-videoPtr->offset.x);
+            if (videoPtr->offset.y > 0)
+                pVideoWindow->put_Top(-videoPtr->offset.y);
+        }
     }
 }
 
 int 
 VideopWidgetObjCmd(ClientData clientData, Tcl_Interp *interp,
-		   int index, int objc, Tcl_Obj *CONST objv[])
+                   int index, int objc, Tcl_Obj *CONST objv[])
 {
     Video *videoPtr = (Video *)clientData;
     VideoPlatformData *pPlatformData = (VideoPlatformData *)videoPtr->platformData;
@@ -167,110 +167,110 @@ VideopWidgetObjCmd(ClientData clientData, Tcl_Interp *interp,
     int r = TCL_OK;
 
     if (pPlatformData == NULL) {
-	Tcl_SetObjResult(interp, Tcl_NewStringObj("platform data not initialized yet", -1));
-	return TCL_ERROR;
+        Tcl_SetObjResult(interp, Tcl_NewStringObj("platform data not initialized yet", -1));
+        return TCL_ERROR;
     }
 
     switch (index) {
     case VIDEO_PROPERTYPAGE:
-	if (objc != 3) {
-	    Tcl_WrongNumArgs(interp, 2, objv, "\"filter\" or \"pin\"");
-	    r = TCL_ERROR;
-	} else {
-	    char * page = Tcl_GetString(objv[2]);
-	    pFilterGraph = pPlatformData->pFilterGraph;
-	    if (strncmp("filter", page, 6) == 0) {
-		ShowCaptureFilterProperties(pFilterGraph, Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)));
-	    } else if (strncmp("pin", page, 3) == 0) {
-		ShowCapturePinProperties(pFilterGraph, Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)));
-	    } else {
-		Tcl_WrongNumArgs(interp, 2, objv, "\"filter\" or \"pin\"");
-		r = TCL_ERROR;
-	    }
-	}
-	break;
+        if (objc != 3) {
+            Tcl_WrongNumArgs(interp, 2, objv, "\"filter\" or \"pin\"");
+            r = TCL_ERROR;
+        } else {
+            char * page = Tcl_GetString(objv[2]);
+            pFilterGraph = pPlatformData->pFilterGraph;
+            if (strncmp("filter", page, 6) == 0) {
+                ShowCaptureFilterProperties(pFilterGraph, Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)));
+            } else if (strncmp("pin", page, 3) == 0) {
+                ShowCapturePinProperties(pFilterGraph, Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)));
+            } else {
+                Tcl_WrongNumArgs(interp, 2, objv, "\"filter\" or \"pin\"");
+                r = TCL_ERROR;
+            }
+        }
+        break;
 
     case VIDEO_DEVICES:
-	if (objc != 2) {
-	    Tcl_WrongNumArgs(interp, 2, objv, "option");
-	    r = TCL_ERROR;
-	} else {
-	    r = GetDeviceList(interp);
-	}
-	break;
+        if (objc != 2) {
+            Tcl_WrongNumArgs(interp, 2, objv, "option");
+            r = TCL_ERROR;
+        } else {
+            r = GetDeviceList(interp);
+        }
+        break;
 
     case VIDEO_STOP:
     case VIDEO_START: 
     case VIDEO_PAUSE:
     {
-	pFilterGraph = pPlatformData->pFilterGraph;
-	if (! pFilterGraph) {
-	    Tcl_SetObjResult(interp, Tcl_NewStringObj("error: no video source initialized", -1));
-	    return TCL_ERROR;
-	}
+        pFilterGraph = pPlatformData->pFilterGraph;
+        if (! pFilterGraph) {
+            Tcl_SetObjResult(interp, Tcl_NewStringObj("error: no video source initialized", -1));
+            return TCL_ERROR;
+        }
 
-	CComPtr<IMediaControl> pMediaControl;
-	CComPtr<IVideoWindow>  pVideoWindow;
-	CComPtr<IBaseFilter> pGrabberFilter;
-	CComPtr<ISampleGrabber> pSampleGrabber;
-	HRESULT hr = pFilterGraph->QueryInterface(IID_IMediaControl, reinterpret_cast<void**>(&pMediaControl));
-	if (SUCCEEDED(hr))
-	    hr = pFilterGraph->QueryInterface(IID_IVideoWindow, reinterpret_cast<void**>(&pVideoWindow));
-	if (SUCCEEDED(hr))
-	    hr = pFilterGraph->FindFilterByName(SAMPLE_GRABBER_NAME, &pGrabberFilter);
-	if (SUCCEEDED(hr))
-	    hr = pGrabberFilter.QueryInterface(&pSampleGrabber);
+        CComPtr<IMediaControl> pMediaControl;
+        CComPtr<IVideoWindow>  pVideoWindow;
+        CComPtr<IBaseFilter> pGrabberFilter;
+        CComPtr<ISampleGrabber> pSampleGrabber;
+        HRESULT hr = pFilterGraph->QueryInterface(IID_IMediaControl, reinterpret_cast<void**>(&pMediaControl));
+        if (SUCCEEDED(hr))
+            hr = pFilterGraph->QueryInterface(IID_IVideoWindow, reinterpret_cast<void**>(&pVideoWindow));
+        if (SUCCEEDED(hr))
+            hr = pFilterGraph->FindFilterByName(SAMPLE_GRABBER_NAME, &pGrabberFilter);
+        if (SUCCEEDED(hr))
+            hr = pGrabberFilter.QueryInterface(&pSampleGrabber);
 
-	if (SUCCEEDED(hr)) {
-	    switch (index) {
-	    case VIDEO_START:
-		hr = pMediaControl->Run();
-		if (SUCCEEDED(hr))
-		    hr = pVideoWindow->put_Visible(OATRUE);
-		if (SUCCEEDED(hr))
-		    hr = pSampleGrabber->SetBufferSamples(TRUE);
-		break;
-	    case VIDEO_PAUSE:
-		hr = pMediaControl->Pause();
-		if (SUCCEEDED(hr))
-		    hr = pVideoWindow->put_Visible(OATRUE);
-		break;
+        if (SUCCEEDED(hr)) {
+            switch (index) {
+            case VIDEO_START:
+                hr = pMediaControl->Run();
+                if (SUCCEEDED(hr))
+                    hr = pVideoWindow->put_Visible(OATRUE);
+                if (SUCCEEDED(hr))
+                    hr = pSampleGrabber->SetBufferSamples(TRUE);
+                break;
+            case VIDEO_PAUSE:
+                hr = pMediaControl->Pause();
+                if (SUCCEEDED(hr))
+                    hr = pVideoWindow->put_Visible(OATRUE);
+                break;
 
-	    case VIDEO_STOP:
-		hr = pMediaControl->Stop();
-		if (SUCCEEDED(hr))
-		    pVideoWindow->put_Visible(OAFALSE);
-		if (SUCCEEDED(hr))
-		    hr = pSampleGrabber->SetBufferSamples(FALSE);
-		break;		
-	    }
-	}
-	r = (long)hr;
-	break;
+            case VIDEO_STOP:
+                hr = pMediaControl->Stop();
+                if (SUCCEEDED(hr))
+                    pVideoWindow->put_Visible(OAFALSE);
+                if (SUCCEEDED(hr))
+                    hr = pSampleGrabber->SetBufferSamples(FALSE);
+                break;                
+            }
+        }
+        r = (long)hr;
+        break;
     }
 
     case VIDEO_PICTURE: 
     {
-	if (objc < 2 || objc > 3) {
-	    Tcl_WrongNumArgs(interp, 2, objv, "?imagename?");
-	    r = TCL_ERROR;
-	} else {
-	    pFilterGraph = pPlatformData->pFilterGraph;
-	    if (! pFilterGraph) {
-		Tcl_SetObjResult(interp, Tcl_NewStringObj("error: no video source initialized", -1));
-		return TCL_ERROR;
-	    }
-	    const char *imageName = NULL;
-	    if (objc == 3)
-		imageName = Tcl_GetString(objv[2]);
-	    r = GrabSample(interp, pFilterGraph, imageName);
-	}
-	break;
+        if (objc < 2 || objc > 3) {
+            Tcl_WrongNumArgs(interp, 2, objv, "?imagename?");
+            r = TCL_ERROR;
+        } else {
+            pFilterGraph = pPlatformData->pFilterGraph;
+            if (! pFilterGraph) {
+                Tcl_SetObjResult(interp, Tcl_NewStringObj("error: no video source initialized", -1));
+                return TCL_ERROR;
+            }
+            const char *imageName = NULL;
+            if (objc == 3)
+                imageName = Tcl_GetString(objv[2]);
+            r = GrabSample(interp, pFilterGraph, imageName);
+        }
+        break;
     }
 
     default:
-	Tcl_WrongNumArgs(interp, 1, objv, "option ?arg arg ...?");
-	r = TCL_ERROR;
+        Tcl_WrongNumArgs(interp, 1, objv, "option ?arg arg ...?");
+        r = TCL_ERROR;
     }
 
     return r;
@@ -289,8 +289,8 @@ ShowCaptureFilterProperties(IGraphBuilder *pFilterGraph, HWND hwnd)
         {
             hr = ::ShowPropertyPages(pFilter, L"Capture Filter", hwnd);
 
-	    //FIX ME: check for changed format.
-	}
+            //FIX ME: check for changed format.
+        }
     }
     return hr;
 }
@@ -302,17 +302,17 @@ ShowCapturePinProperties(IGraphBuilder *pFilterGraph, HWND hwnd)
     if (pFilterGraph)
     {
         CComPtr<IBaseFilter> pFilter;
-	CComPtr<IPin> pPin;
+        CComPtr<IPin> pPin;
 
         hr = pFilterGraph->FindFilterByName(CAPTURE_FILTER_NAME, &pFilter);
-	if (SUCCEEDED(hr))
-	    hr = FindPinByCategory(pFilter, PIN_CATEGORY_CAPTURE, &pPin);
+        if (SUCCEEDED(hr))
+            hr = FindPinByCategory(pFilter, PIN_CATEGORY_CAPTURE, &pPin);
         if (SUCCEEDED(hr))
         {
             hr = ::ShowPropertyPages(pPin, L"Capture Pin", hwnd);
 
-	    //FIX ME: check for changed format.
-	}
+            //FIX ME: check for changed format.
+        }
     }
     return hr;
 }
@@ -326,39 +326,40 @@ GetDeviceList(Tcl_Interp *interp)
 
     HRESULT hr = pCreateDevEnum.CoCreateInstance(CLSID_SystemDeviceEnum);
     if (SUCCEEDED(hr))
-	hr = CreateBindCtx(0, &pctx);
+        hr = CreateBindCtx(0, &pctx);
     if (SUCCEEDED(hr))
     {
-	CComPtr<IEnumMoniker> pEnumMoniker;
-	IMoniker *pmks[12];
-	ULONG nmks = 0;
-	HRESULT hrLoop = S_OK;
+        CComPtr<IEnumMoniker> pEnumMoniker;
+        IMoniker *pmks[12];
+        ULONG nmks = 0;
+        HRESULT hrLoop = S_OK;
 
-	listPtr = Tcl_NewListObj(0, NULL);
+        listPtr = Tcl_NewListObj(0, NULL);
 
+        // bug #4992: returns S_FALSE in the event of failure and sets the pointer NULL.
         hr = pCreateDevEnum->CreateClassEnumerator(CLSID_VideoInputDeviceCategory, &pEnumMoniker, 0);
-	while (SUCCEEDED(hr) && hrLoop == S_OK)
-	{
-	    hr = hrLoop = pEnumMoniker->Next(12, pmks, &nmks);
-	    for (ULONG n = 0; SUCCEEDED(hr) && n < nmks; n++)
-	    {
-		CComPtr<IPropertyBag> pbag;
-		CComVariant vName;
-		hr = pmks[n]->BindToStorage(pctx, NULL, IID_IPropertyBag, reinterpret_cast<void**>(&pbag));
-		if (SUCCEEDED(hr))
-		    hr = pbag->Read(L"FriendlyName", &vName, NULL);
-		if (SUCCEEDED(hr))
-		    Tcl_ListObjAppendElement(interp, listPtr, Tcl_NewUnicodeObj(vName.bstrVal, -1));
+        while (SUCCEEDED(hr) && pEnumMoniker && hrLoop == S_OK)
+        {
+            hr = hrLoop = pEnumMoniker->Next(12, pmks, &nmks);
+            for (ULONG n = 0; SUCCEEDED(hr) && n < nmks; n++)
+            {
+                CComPtr<IPropertyBag> pbag;
+                CComVariant vName;
+                hr = pmks[n]->BindToStorage(pctx, NULL, IID_IPropertyBag, reinterpret_cast<void**>(&pbag));
+                if (SUCCEEDED(hr))
+                    hr = pbag->Read(L"FriendlyName", &vName, NULL);
+                if (SUCCEEDED(hr))
+                    Tcl_ListObjAppendElement(interp, listPtr, Tcl_NewUnicodeObj(vName.bstrVal, -1));
 
-		pmks[n]->Release(),  pmks[n] = 0;
-	    }
-	    if (hrLoop == S_OK)
-		hr = pEnumMoniker->Reset();
-	}
+                pmks[n]->Release(),  pmks[n] = 0;
+            }
+            if (hrLoop == S_OK)
+                hr = pEnumMoniker->Reset();
+        }
         
         if (SUCCEEDED(hr)) {
-	    Tcl_SetObjResult(interp, listPtr);
-	}
+            Tcl_SetObjResult(interp, listPtr);
+        }
     }
     return SUCCEEDED(hr) ? TCL_OK : TCL_ERROR;;
 
@@ -379,31 +380,31 @@ ConstructFileGraph(LPOLESTR sFilename, IGraphBuilder **ppGraphBuilder)
         hr = pGraphBuilder->AddFilter(pGrabberFilter, SAMPLE_GRABBER_NAME);
     if (SUCCEEDED(hr))
     {
-	// Set the grabber to grab video stills.
-	AM_MEDIA_TYPE mt;
-	ZeroMemory(&mt, sizeof(AM_MEDIA_TYPE));
-	mt.majortype = MEDIATYPE_Video;
-	HDC hdc = ::GetDC(HWND_DESKTOP);
-	int iBitDepth = GetDeviceCaps(hdc, BITSPIXEL);
+        // Set the grabber to grab video stills.
+        AM_MEDIA_TYPE mt;
+        ZeroMemory(&mt, sizeof(AM_MEDIA_TYPE));
+        mt.majortype = MEDIATYPE_Video;
+        HDC hdc = ::GetDC(HWND_DESKTOP);
+        int iBitDepth = GetDeviceCaps(hdc, BITSPIXEL);
 
-	switch (iBitDepth) {
-	case  8: mt.subtype = MEDIASUBTYPE_RGB8;   break;
-	case 24: mt.subtype = MEDIASUBTYPE_RGB24;  break;
-	case 32: mt.subtype = MEDIASUBTYPE_RGB32;  break;
-	case 16: {
-		int r = 0, g = 0, b = 0;
-		mt.subtype = MEDIASUBTYPE_RGB565;
-		if (GetRGBBitsPerPixel(hdc, &r, &g, &b) && g == 5)
-		    mt.subtype = MEDIASUBTYPE_RGB555;
-	    }
-	    break;
-	default: mt.subtype = MEDIASUBTYPE_RGB24; break;
-	}
-	::ReleaseDC(HWND_DESKTOP, hdc);
+        switch (iBitDepth) {
+        case  8: mt.subtype = MEDIASUBTYPE_RGB8;   break;
+        case 24: mt.subtype = MEDIASUBTYPE_RGB24;  break;
+        case 32: mt.subtype = MEDIASUBTYPE_RGB32;  break;
+        case 16: {
+                int r = 0, g = 0, b = 0;
+                mt.subtype = MEDIASUBTYPE_RGB565;
+                if (GetRGBBitsPerPixel(hdc, &r, &g, &b) && g == 5)
+                    mt.subtype = MEDIASUBTYPE_RGB555;
+            }
+            break;
+        default: mt.subtype = MEDIASUBTYPE_RGB24; break;
+        }
+        ::ReleaseDC(HWND_DESKTOP, hdc);
 
-	CComQIPtr<ISampleGrabber> pSampleGrabber(pGrabberFilter);
-	if (pSampleGrabber)
-	    hr = pSampleGrabber->SetMediaType(&mt);
+        CComQIPtr<ISampleGrabber> pSampleGrabber(pGrabberFilter);
+        if (pSampleGrabber)
+            hr = pSampleGrabber->SetMediaType(&mt);
     }
 
     // Add a video renderer to the graph
@@ -415,9 +416,9 @@ ConstructFileGraph(LPOLESTR sFilename, IGraphBuilder **ppGraphBuilder)
     
     // begin rendering our file.
     if (SUCCEEDED(hr))
-	hr = pGraphBuilder->RenderFile(sFilename, NULL);
+        hr = pGraphBuilder->RenderFile(sFilename, NULL);
     if (SUCCEEDED(hr))
-	hr = pGraphBuilder.CopyTo(ppGraphBuilder);
+        hr = pGraphBuilder.CopyTo(ppGraphBuilder);
     return hr;
 }
 
@@ -550,13 +551,13 @@ ConnectFilterGraph(IGraphBuilder *pGraphBuilder,
     case 24: mt.subtype = MEDIASUBTYPE_RGB24;  break;
     case 32: mt.subtype = MEDIASUBTYPE_RGB32;  break;
     case 16:
-	{
-	    int r = 0, g = 0, b = 0;
-	    mt.subtype = MEDIASUBTYPE_RGB565;
-	    if (GetRGBBitsPerPixel(hdc, &r, &g, &b) && g == 5)
-		mt.subtype = MEDIASUBTYPE_RGB555;
-	}
-	break;
+        {
+            int r = 0, g = 0, b = 0;
+            mt.subtype = MEDIASUBTYPE_RGB565;
+            if (GetRGBBitsPerPixel(hdc, &r, &g, &b) && g == 5)
+                mt.subtype = MEDIASUBTYPE_RGB555;
+        }
+        break;
     default: mt.subtype = MEDIASUBTYPE_RGB24; break;
     }
     ::ReleaseDC(HWND_DESKTOP, hdc);
@@ -655,7 +656,7 @@ GetVideoSize(IGraphBuilder *pFilterGraph, long *pWidth, long *pHeight)
         if (SUCCEEDED(hr))
             hr = FindPinByDirection(pFilter, PINDIR_INPUT, &pPin);
         if (SUCCEEDED(hr))
-	    hr = pPin->ConnectionMediaType(&mt);
+            hr = pPin->ConnectionMediaType(&mt);
         if (SUCCEEDED(hr))
         {
             if (mt.formattype == FORMAT_VideoInfo)
@@ -729,23 +730,23 @@ GrabSample(Tcl_Interp *interp, IGraphBuilder *pFilterGraph, LPCSTR imageName)
 
     HRESULT hr = pFilterGraph->FindFilterByName(SAMPLE_GRABBER_NAME, &pGrabberFilter);
     if (SUCCEEDED(hr))
-	hr = pGrabberFilter.QueryInterface(&pSampleGrabber);
+        hr = pGrabberFilter.QueryInterface(&pSampleGrabber);
 
     AM_MEDIA_TYPE mt;
     ZeroMemory(&mt, sizeof(AM_MEDIA_TYPE));
 
     if (SUCCEEDED(hr))
-	hr = pSampleGrabber->GetConnectedMediaType(&mt);
+        hr = pSampleGrabber->GetConnectedMediaType(&mt);
 
     // Copy the bitmap info from the media type structure
     VIDEOINFOHEADER *pvih = reinterpret_cast<VIDEOINFOHEADER *>(mt.pbFormat);
     BITMAPINFOHEADER bih;
     if (SUCCEEDED(hr))
     {
-	ZeroMemory(&bih, sizeof(BITMAPINFOHEADER));
-	CopyMemory(&bih, &pvih->bmiHeader, sizeof(BITMAPINFOHEADER));
-	if (mt.cbFormat > 0)
-	    CoTaskMemFree(mt.pbFormat);
+        ZeroMemory(&bih, sizeof(BITMAPINFOHEADER));
+        CopyMemory(&bih, &pvih->bmiHeader, sizeof(BITMAPINFOHEADER));
+        if (mt.cbFormat > 0)
+            CoTaskMemFree(mt.pbFormat);
     }
 
     // Get the image data - first finding out how much space to allocate.
@@ -753,81 +754,87 @@ GrabSample(Tcl_Interp *interp, IGraphBuilder *pFilterGraph, LPCSTR imageName)
     long cbData = 0;
     LPBYTE pData = NULL;
     if (SUCCEEDED(hr))
-	hr = pSampleGrabber->GetCurrentBuffer(&cbData, NULL);
+        hr = pSampleGrabber->GetCurrentBuffer(&cbData, NULL);
     if (SUCCEEDED(hr))
     {
-	pData = new BYTE[cbData];
-	hr = pSampleGrabber->GetCurrentBuffer(&cbData, reinterpret_cast<long*>(pData));
-	if (SUCCEEDED(hr))
-	{
-	    // Create a photo image.
-	    //image create photo -height n -width
-	    Tcl_Obj *objv[8];
-	    int      ndx = 0;
-	    objv[ndx++] = Tcl_NewStringObj("image", -1);
-	    objv[ndx++] = Tcl_NewStringObj("create", -1);
-	    objv[ndx++] = Tcl_NewStringObj("photo", -1);
-	    if (imageName != NULL)
-		objv[ndx++] = Tcl_NewStringObj(imageName, -1);
-	    objv[ndx++] = Tcl_NewStringObj("-height", -1);
-	    objv[ndx++] = Tcl_NewLongObj(bih.biHeight);
-	    objv[ndx++] = Tcl_NewStringObj("-width", -1);
-	    objv[ndx++] = Tcl_NewLongObj(bih.biWidth);
-	    r = Tcl_EvalObjv(interp, ndx, objv, 0);
-	    if (r == TCL_OK) {
-		imageName = Tcl_GetStringResult(interp);
-		Tk_PhotoHandle img = Tk_FindPhoto(interp, imageName);
-		Tk_PhotoImageBlock block;
+        pData = new BYTE[cbData];
+        hr = pSampleGrabber->GetCurrentBuffer(&cbData, reinterpret_cast<long*>(pData));
+        if (SUCCEEDED(hr))
+        {
+            // Create a photo image.
+            //image create photo -height n -width
+            Tcl_Obj *objv[8];
+            int      ndx = 0;
+            objv[ndx++] = Tcl_NewStringObj("image", -1);
+            objv[ndx++] = Tcl_NewStringObj("create", -1);
+            objv[ndx++] = Tcl_NewStringObj("photo", -1);
+            if (imageName != NULL)
+                objv[ndx++] = Tcl_NewStringObj(imageName, -1);
+            objv[ndx++] = Tcl_NewStringObj("-height", -1);
+            objv[ndx++] = Tcl_NewLongObj(bih.biHeight);
+            objv[ndx++] = Tcl_NewStringObj("-width", -1);
+            objv[ndx++] = Tcl_NewLongObj(bih.biWidth);
+            r = Tcl_EvalObjv(interp, ndx, objv, 0);
+            if (r == TCL_OK) {
+                imageName = Tcl_GetStringResult(interp);
+                Tk_PhotoHandle img = Tk_FindPhoto(interp, imageName);
+                Tk_PhotoImageBlock block;
 
-		Tk_PhotoBlank(img);
-		block.width = bih.biWidth;
-		block.height = bih.biHeight;
-		// hard coding for 24/32 bit bitmaps.
-		block.pixelSize = bih.biBitCount / 8;
-		block.pitch  = block.pixelSize * block.width;
-		block.offset[0] = 2;  /* R */
-		block.offset[1] = 1;  /* G */
-		block.offset[2] = 0;  /* B */
+                Tk_PhotoBlank(img);
+                block.width = bih.biWidth;
+                block.height = bih.biHeight;
+                // hard coding for 24/32 bit bitmaps.
+                block.pixelSize = bih.biBitCount / 8;
+                block.pitch  = block.pixelSize * block.width;
+                block.offset[0] = 2;  /* R */
+                block.offset[1] = 1;  /* G */
+                block.offset[2] = 0;  /* B */
 #if TK_MINOR_VERSION >= 3
-		block.offset[3] = 3;
+                block.offset[3] = 3;
 #endif
-		block.pixelPtr = pData;
+                block.pixelPtr = pData;
 
 #if TK_MINOR_VERSION >= 3
-		// We have to fix the alpha channel. By default it is undefined and tends to
-		// produce a transparent image.
-		for (LPBYTE p = block.pixelPtr; p < block.pixelPtr+cbData; p += block.pixelSize)
-		    *(p + block.offset[3]) = 0xff;
+                // We have to fix the alpha channel. By default it is undefined and tends to
+                // produce a transparent image.
+                for (LPBYTE p = block.pixelPtr; p < block.pixelPtr+cbData; p += block.pixelSize)
+                    *(p + block.offset[3]) = 0xff;
 #endif
 
-		// If biHeight is positive the bitmap is a bottom-up DIB.
-		if (bih.biHeight > 0)
+                // If biHeight is positive the bitmap is a bottom-up DIB.
+                if (bih.biHeight > 0)
                 {
-		    DWORD cbRow = block.pitch;
-		    LPBYTE pTmp = new BYTE[cbRow];
-		    for (int i = 0; i < block.height/2; i++)
-		    {
-			LPBYTE pTop = block.pixelPtr + (i * cbRow);
-			LPBYTE pBot = block.pixelPtr + ((block.height - i - 1) * cbRow);
-			CopyMemory(pTmp, pBot, cbRow);
-			CopyMemory(pBot, pTop, cbRow);
-			CopyMemory(pTop, pTmp, cbRow);
-		    }
-		}
+                    DWORD cbRow = block.pitch;
+                    LPBYTE pTmp = new BYTE[cbRow];
+                    for (int i = 0; i < block.height/2; i++)
+                    {
+                        LPBYTE pTop = block.pixelPtr + (i * cbRow);
+                        LPBYTE pBot = block.pixelPtr + ((block.height - i - 1) * cbRow);
+                        CopyMemory(pTmp, pBot, cbRow);
+                        CopyMemory(pBot, pTop, cbRow);
+                        CopyMemory(pTop, pTmp, cbRow);
+                    }
+                }
 
-		Tk_PhotoPutBlock(
+                Tk_PhotoPutBlock(
 #if TK_MAJOR_VERSION >= 8 && TK_MINOR_VERSION >= 5
-				 interp,
+                                 interp,
 #endif
-				 img, &block,
-				 0, 0, bih.biWidth, bih.biHeight, TK_PHOTO_COMPOSITE_SET);
-	    }	
-	}
+                                 img, &block,
+                                 0, 0, bih.biWidth, bih.biHeight, TK_PHOTO_COMPOSITE_SET);
+            }        
+        }
     }
     if (FAILED(hr)) {
-	Tcl_SetResult(interp, "argh!", TCL_STATIC);
-	r = TCL_ERROR;
+        Tcl_SetResult(interp, "argh!", TCL_STATIC);
+        r = TCL_ERROR;
     }
 
     return r;
 }
+
+// -------------------------------------------------------------------------
+// Local variables:
+// mode: c++
+// indent-tabs-mode: nil
+// End:

@@ -52,8 +52,9 @@ GetDeviceMoniker(int DeviceIndex, IMoniker **ppMoniker)
 	ULONG nmks = 0;
 	HRESULT hrLoop = S_OK;
 
+        // bug #4992: this returns S_FALSE and sets the pointer NULL on failure.
         hr = pCreateDevEnum->CreateClassEnumerator(CLSID_VideoInputDeviceCategory, &pEnumMoniker, 0);
-	while (SUCCEEDED(hr) && hrLoop == S_OK)
+	while (SUCCEEDED(hr) && pEnumMoniker && hrLoop == S_OK)
 	{
 	    hr = hrLoop = pEnumMoniker->Next(12, pmks, &nmks);
 	    for (ULONG n = 0; SUCCEEDED(hr) && n < nmks; n++)
@@ -68,8 +69,8 @@ GetDeviceMoniker(int DeviceIndex, IMoniker **ppMoniker)
 	    if (hrLoop == S_OK)
 		hr = pEnumMoniker->Reset();
 	}
-        
-        hr = (hrLoop == S_FALSE) ? S_OK : E_INVALIDARG;
+        if (SUCCEEDED(hr))
+            hr = (hrLoop == S_FALSE) ? S_OK : E_INVALIDARG;
     }
     return hr;
 }
