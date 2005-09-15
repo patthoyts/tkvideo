@@ -1,3 +1,10 @@
+2005-09-15  Pat Thoyts  <patthoyts@users.sourceforge.net>
+
+	* generic/tkvideo.h: Implemented support for recording data to
+	* generic/tkvideo.c: avi and wmv files and enabled audio.
+	* win/winvideo.cpp:  Added support for seeking in seekable streams
+	* demos/demo.tcl:    Many other big fixes and cleanups.
+	
 2005-09-09  Pat Thoyts  <patthoyts@users.sourceforge.net>
 
 	* win/winvideo.cpp: fixed bug #4992 - CreateClassEnumerator

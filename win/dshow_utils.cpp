@@ -37,7 +37,7 @@ ShowPropertyPages(LPUNKNOWN Object, LPCOLESTR Caption, HWND hwnd)
  */
 
 HRESULT
-GetDeviceMoniker(int DeviceIndex, IMoniker **ppMoniker)
+GetDeviceMoniker(CLSID Category, int DeviceIndex, IMoniker **ppMoniker)
 {
     CComPtr<ICreateDevEnum> pCreateDevEnum;
 
@@ -53,7 +53,7 @@ GetDeviceMoniker(int DeviceIndex, IMoniker **ppMoniker)
 	HRESULT hrLoop = S_OK;
 
         // bug #4992: this returns S_FALSE and sets the pointer NULL on failure.
-        hr = pCreateDevEnum->CreateClassEnumerator(CLSID_VideoInputDeviceCategory, &pEnumMoniker, 0);
+        hr = pCreateDevEnum->CreateClassEnumerator(Category, &pEnumMoniker, 0);
 	while (SUCCEEDED(hr) && pEnumMoniker && hrLoop == S_OK)
 	{
 	    hr = hrLoop = pEnumMoniker->Next(12, pmks, &nmks);
@@ -76,14 +76,14 @@ GetDeviceMoniker(int DeviceIndex, IMoniker **ppMoniker)
 }
 
 HRESULT
-GetDeviceName(int DeviceIndex, BSTR *pstrName)
+GetDeviceName(CLSID Category, int DeviceIndex, BSTR *pstrName)
 {
     CComPtr<IMoniker> pmk;
     CComPtr<IBindCtx> pctx;
     CComPtr<IPropertyBag> pbag;
     CComVariant v;
 
-    HRESULT hr = GetDeviceMoniker(DeviceIndex, &pmk);
+    HRESULT hr = GetDeviceMoniker(Category, DeviceIndex, &pmk);
     if (SUCCEEDED(hr))
         hr = CreateBindCtx(0, &pctx);
     if (SUCCEEDED(hr))
@@ -96,12 +96,12 @@ GetDeviceName(int DeviceIndex, BSTR *pstrName)
 }
 
 HRESULT
-GetDeviceID(int DeviceIndex, BSTR *pstrName)
+GetDeviceID(CLSID Category, int DeviceIndex, BSTR *pstrName)
 {
     CComPtr<IMoniker> pmk;
     CComPtr<IBindCtx> pctx;
 
-    HRESULT hr = GetDeviceMoniker(DeviceIndex, &pmk);
+    HRESULT hr = GetDeviceMoniker(Category, DeviceIndex, &pmk);
     if (SUCCEEDED(hr))
         hr = CreateBindCtx(0, &pctx);
     if (SUCCEEDED(hr))

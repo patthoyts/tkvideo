@@ -6,13 +6,14 @@
 #include <dshow.h>
 
 #define CAPTURE_FILTER_NAME   L"Capture Filter"
+#define AUDIO_FILTER_NAME     L"Audio Filter"
 #define SAMPLE_GRABBER_NAME   L"Sample Grabber"
 #define RENDERER_FILTER_NAME  L"Renderer"
 
 HRESULT ShowPropertyPages(LPUNKNOWN Object, LPCOLESTR Caption = NULL, HWND hwnd = NULL);
-HRESULT GetDeviceMoniker(int DeviceIndex, IMoniker **ppMoniker);
-HRESULT GetDeviceName(int DeviceIndex, BSTR *pstrName);
-HRESULT GetDeviceID(int DeviceIndex, BSTR *pstrName);
+HRESULT GetDeviceMoniker(CLSID Category, int DeviceIndex, IMoniker **ppMoniker);
+HRESULT GetDeviceName(CLSID Category, int DeviceIndex, BSTR *pstrName);
+HRESULT GetDeviceID(CLSID Category, int DeviceIndex, BSTR *pstrName);
 HRESULT FindPinByName(IBaseFilter *pFilter, LPCWSTR sID, LPCWSTR sName, IPin **ppPin);
 HRESULT FindPinByCategory(IBaseFilter *pFilter, REFGUID Category, IPin **ppPin);
 HRESULT FindPinByDirection(IBaseFilter *pFilter, PIN_DIRECTION eDirection, IPin **ppPin);

@@ -43,6 +43,8 @@ typedef struct {
     Tcl_Obj *yscrollcmdPtr;
 
     Tcl_Obj *sourcePtr;
+    Tcl_Obj *audioPtr;
+    Tcl_Obj *outputPtr;
 
     Tk_Cursor cursor;      /* support alternate cursor */
     Tcl_Obj *takeFocusPtr; /* used for keyboard traversal */
@@ -53,17 +55,21 @@ typedef struct {
 
 enum {
     VIDEO_CGET, VIDEO_CONFIGURE, VIDEO_XVIEW, VIDEO_YVIEW, VIDEO_PROPERTYPAGE,
-    VIDEO_STOP, VIDEO_START, VIDEO_PAUSE, VIDEO_DEVICES, VIDEO_PICTURE
+    VIDEO_STOP, VIDEO_START, VIDEO_PAUSE, VIDEO_DEVICES, VIDEO_PICTURE,
+    VIDEO_SEEK, VIDEO_TELL
 };
 
 int  VideopInit(Tcl_Interp *interp);
 int  VideopCreateWidget(Video *videoPtr);
-void VideopDestroy(char *memPtr);
+void VideopDestroy(Video *videoPtr);
+void VideopCleanup(char *memPtr);
 int  VideopWidgetObjCmd(ClientData clientData, Tcl_Interp *interp,
 		       int index, int objc, Tcl_Obj *CONST objv[]);
 void VideopCalculateGeometry(Video *videoPtr);
 
 int InitVideoSource(Video *videoPtr);
+void SendVirtualEvent(Tk_Window targetwin, const char *eventName);
+void SendConfigureEvent(Tk_Window tgtWin, int x, int y, int height, int width);
 
 #ifdef __cplusplus
 }

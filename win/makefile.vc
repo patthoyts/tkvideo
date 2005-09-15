@@ -160,7 +160,7 @@ Please `cd` to its location first.
 PROJECT = tkvideo
 !include "rules.vc"
 
-DOTVERSION      = 1.1.0
+DOTVERSION      = 1.2.0
 VERSION         = $(DOTVERSION:.=)
 STUBPREFIX      = $(PROJECT)stub
 

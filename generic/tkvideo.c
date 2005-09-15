@@ -16,9 +16,11 @@
 #define DEF_VIDEO_STRETCH      "0"
 #define DEF_VIDEO_CURSOR       ""
 #define DEF_VIDEO_TAKE_FOCUS   "0"
+#define DEF_VIDEO_OUTPUT       ""
 
 #define VIDEO_SOURCE_CHANGED   0x01
 #define VIDEO_GEOMETRY_CHANGED 0x02
+#define VIDEO_OUTPUT_CHANGED   0x04
 
 static Tk_OptionSpec videoOptionSpec[] = {
     {TK_OPTION_SYNONYM, "-bg", (char *) NULL, (char *) NULL,
@@ -31,6 +33,10 @@ static Tk_OptionSpec videoOptionSpec[] = {
 	DEF_VIDEO_WIDTH, Tk_Offset(Video, widthPtr), -1, 0, 0, VIDEO_GEOMETRY_CHANGED},
     {TK_OPTION_STRING, "-source", "source", "Source",
 	DEF_VIDEO_SOURCE, Tk_Offset(Video, sourcePtr), -1, 0, 0, VIDEO_SOURCE_CHANGED },
+    {TK_OPTION_STRING, "-audiosource", "audiosource", "AudioSource",
+	DEF_VIDEO_SOURCE, Tk_Offset(Video, audioPtr), -1, 0, 0, VIDEO_SOURCE_CHANGED },
+    {TK_OPTION_STRING, "-output", "output", "Output",
+	DEF_VIDEO_OUTPUT, Tk_Offset(Video, outputPtr), -1, 0, 0, VIDEO_OUTPUT_CHANGED },
     {TK_OPTION_STRING, "-xscrollcommand", "xScrollCommand", "ScrollCommand",
 	DEF_VIDEO_SCROLL_CMD, Tk_Offset(Video, xscrollcmdPtr), -1,
 	TK_OPTION_NULL_OK, 0, 0},
@@ -66,7 +72,7 @@ static int VideoObjCmd(ClientData clientData, Tcl_Interp *interp,
 static int VideoWidgetObjCmd(ClientData clientData, Tcl_Interp *interp, 
     int objc, Tcl_Obj *CONST objv[]);
 static void VideoDeletedProc(ClientData clientData);
-static void VideoDestroy(char *memPtr);
+static void VideoCleanup(char *memPtr);
 static void VideoDisplay(ClientData clientData);
 static void VideoObjEventProc(ClientData clientData, XEvent *evPtr);
 static int  VideoConfigure(Tcl_Interp *interp, Video *videoPtr, int objc, Tcl_Obj *CONST objv[]);
@@ -178,8 +184,8 @@ VideoWidgetObjCmd(ClientData clientData, Tcl_Interp *interp,
     
     static CONST84 char *options[] = {
 	"cget", "configure", "xview", "yview", "propertypage",
-	"stop", "start", "pause", "devices", "picture",
-	(char *)NULL
+	"stop", "start", "pause", "devices", "picture", "seek",
+	"tell", (char *)NULL
     };
 
     if (objc < 2) {
@@ -215,7 +221,7 @@ VideoWidgetObjCmd(ClientData clientData, Tcl_Interp *interp,
 		if (objc == 3)
 		    optionPtr = objv[2];
 		resultPtr = Tk_GetOptionInfo(interp, (char *)videoPtr,
-		    videoPtr->optionTable, (Tcl_Obj*)NULL, tkwin);
+		    videoPtr->optionTable, (Tcl_Obj*)optionPtr, tkwin);
 		r = (resultPtr != NULL) ? TCL_OK : TCL_ERROR;
 	    } else {
 		r = VideoConfigure(interp, videoPtr, objc - 2, objv + 2);
@@ -271,7 +277,7 @@ static int VideoConfigure(Tcl_Interp *interp, Video *videoPtr,
 	    Tcl_AddErrorInfo(interp, "\n    (processing -height option)");
 	}
 
-	if (flags & VIDEO_SOURCE_CHANGED) {
+	if (flags & VIDEO_SOURCE_CHANGED || flags & VIDEO_OUTPUT_CHANGED) {
 	    if (!Tk_IsMapped(tkwin)) {
 		Tk_MakeWindowExist(tkwin);
 	    }
@@ -285,6 +291,13 @@ static int VideoConfigure(Tcl_Interp *interp, Video *videoPtr,
     return r;
 }
 
+/*
+ *---------------------------------------------------------------------------
+ *
+ * VideoCalculateGeometry --
+ *
+ *      ?
+ */
 static void
 VideoCalculateGeometry(Video *videoPtr)
 {
@@ -363,6 +376,7 @@ VideoObjEventProc(ClientData clientData, XEvent *eventPtr)
     } else if (eventPtr->type == DestroyNotify) {
 
 	if (videoPtr->tkwin != NULL) {
+            VideopDestroy(videoPtr);
 	    Tk_FreeConfigOptions((char *)videoPtr, videoPtr->optionTable,
 		videoPtr->tkwin);
 	    videoPtr->tkwin = NULL;
@@ -372,7 +386,7 @@ VideoObjEventProc(ClientData clientData, XEvent *eventPtr)
 	    Tcl_CancelIdleCall(VideoDisplay, clientData);
 	    videoPtr->flags &= ~REDRAW_PENDING;
 	}
-	Tcl_EventuallyFree(clientData, VideoDestroy);
+	Tcl_EventuallyFree(clientData, VideoCleanup);
 
     }
 }
@@ -391,9 +405,9 @@ VideoDeletedProc(ClientData clientData)
 }
 
 static void
-VideoDestroy(char *memPtr)
+VideoCleanup(char *memPtr)
 {
-    VideopDestroy(memPtr);
+    VideopCleanup(memPtr);
     ckfree(memPtr);
 }
 
@@ -671,4 +685,48 @@ VideoUpdateHScrollbar(Video* videoPtr)
 	Tcl_BackgroundError(interp);
     }
     Tcl_Release((ClientData) interp);
+}
+
+/* --- Nicked from 'tile' --- */
+/* SendVirtualEvent --
+ *      Send a virtual event notification to the specified target window.
+ *      Equivalent to "event generate $tgtWindow <<$eventName>>"
+ *
+ *      Note that we use Tk_QueueWindowEvent, not Tk_HandleEvent,
+ *      so this routine does not reenter the interpreter.
+ */
+
+void 
+SendVirtualEvent(Tk_Window tgtWin, const char *eventName)
+{
+    XEvent event;
+
+    memset(&event, 0, sizeof(event));
+    event.xany.type = VirtualEvent;
+    event.xany.serial = NextRequest(Tk_Display(tgtWin));
+    event.xany.send_event = False;
+    event.xany.window = Tk_WindowId(tgtWin);
+    event.xany.display = Tk_Display(tgtWin);
+    ((XVirtualEvent *) &event)->name = Tk_GetUid(eventName);
+
+    Tk_QueueWindowEvent(&event, TCL_QUEUE_TAIL);
+}
+
+void 
+SendConfigureEvent(Tk_Window tgtWin, int x, int y, int width, int height)
+{
+    XEvent event;
+
+    memset(&event, 0, sizeof(event));
+    event.xany.type = ConfigureNotify;
+    event.xany.serial = NextRequest(Tk_Display(tgtWin));
+    event.xany.send_event = False;
+    event.xany.window = Tk_WindowId(tgtWin);
+    event.xany.display = Tk_Display(tgtWin);
+    event.xconfigure.width = width;
+    event.xconfigure.height = height;
+    event.xconfigure.x = x;
+    event.xconfigure.y = y;
+
+    Tk_QueueWindowEvent(&event, TCL_QUEUE_TAIL);
 }

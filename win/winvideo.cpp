@@ -16,31 +16,53 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <shlwapi.h>
 #include "tkvideo.h"
 #include <tkPlatDecls.h>
 #include "dshow_utils.h"
-
 #include <qedit.h>
+
+//#ifdef HAVE_WMF_SDK
+//#include <dshowasf.h>
+//#endif // HAVE_WMF_SDK
+
+#if _MSC_VER >= 100
 #pragma comment(lib, "amstrmid")
 #pragma comment(lib, "gdi32")
+#pragma comment(lib, "shlwapi")
+#endif
 
-static HRESULT ShowCaptureFilterProperties(IGraphBuilder *pFilterGraph, HWND hwnd);
-static HRESULT ShowCapturePinProperties(IGraphBuilder *pFilterGraph, HWND hwnd);
-static HRESULT ConstructCaptureGraph(int DeviceIndex, IGraphBuilder **ppGraphBuilder);
-static HRESULT ConstructFileGraph(LPOLESTR sFilename, IGraphBuilder **ppGraphBuilder);
-static HRESULT ReconnectFilterGraph(IGraphBuilder *pGraphBuilder);
-static HRESULT ConnectFilterGraph(IGraphBuilder *pGraphBuilder, IBaseFilter *pCaptureFilter, IBaseFilter *pGrabberFilter, IBaseFilter *pRenderFilter);
-static HRESULT ConnectVideo(IGraphBuilder *pGraphBuilder, HWND hwnd, IVideoWindow **ppVideoWindow);
-static HRESULT GetVideoSize(IGraphBuilder *pFilterGraph, long *pWidth, long *pHeight);
-static HRESULT DisconnectFilterGraph(IFilterGraph *pFilterGraph);
-static HRESULT DisconnectPins(IBaseFilter *pFilter);
-static int GrabSample(Tcl_Interp *interp, IGraphBuilder *pFilterGraph, LPCSTR imageName);
-static int GetDeviceList(Tcl_Interp *interp);
+/** Application specific window message for filter graph notifications */
+#define WM_GRAPHNOTIFY WM_APP + 82
+
+/**
+ * Windows platform specific data to be added to the tkvide widget structure
+ */
 
 typedef struct {
     IGraphBuilder *pFilterGraph;
+    IMediaEventEx *pMediaEvent;
+    IMediaSeeking *pMediaSeeking;
     DWORD          dwRegistrationId;
+    WNDPROC        wndproc;
 } VideoPlatformData;
+
+static HRESULT ShowCaptureFilterProperties(IGraphBuilder *pFilterGraph, HWND hwnd);
+static HRESULT ShowCapturePinProperties(IGraphBuilder *pFilterGraph, HWND hwnd);
+static HRESULT ConstructCaptureGraph(int nDevice, int nAudio, LPCWSTR sSource, LPCWSTR sOutput, IGraphBuilder **ppGraphBuilder);
+static HRESULT CreateCompatibleSampleGrabber(IBaseFilter **ppFilter);
+static HRESULT ConnectVideo(Video *videoPtr, HWND hwnd, IVideoWindow **ppVideoWindow);
+static HRESULT GetVideoSize(IGraphBuilder *pFilterGraph, long *pWidth, long *pHeight);
+static void ReleasePlatformData(VideoPlatformData *pPlatformData);
+static int GrabSample(Tcl_Interp *interp, IGraphBuilder *pFilterGraph, LPCSTR imageName);
+static int GetDeviceList(Tcl_Interp *interp, CLSID clsidCategory);
+LRESULT APIENTRY VideopWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+
+/**
+ * Windows platform specific package initialization. We only need to setup for COM
+ * This call joins our interpreter thread to a single threaded apartment.
+ * @return A tcl result code.
+ */
 
 int 
 VideopInit(Tcl_Interp *interp)
@@ -49,10 +71,20 @@ VideopInit(Tcl_Interp *interp)
     return SUCCEEDED(hr) ? TCL_OK : TCL_ERROR;
 }
 
+/**
+ * Windows platform specific widget initialization. This function
+ * is called just after the Tk widget has been created and the core
+ * data structure initialized. This is our oportunity to initialize 
+ * any platform specific extension data. See VideoPlatformData
+ *
+ * @param videoPtr pointer to the widget instance data
+ */
+
 int
 VideopCreateWidget(Video *videoPtr)
 {
-    videoPtr->platformData = (ClientData)ckalloc(sizeof(VideoPlatformData));
+    VideoPlatformData *platformPtr = (VideoPlatformData *)ckalloc(sizeof(VideoPlatformData));
+    videoPtr->platformData = (ClientData)platformPtr;
     if (videoPtr->platformData != NULL) {
         memset(videoPtr->platformData, 0, sizeof(VideoPlatformData));
     } else {
@@ -61,22 +93,51 @@ VideopCreateWidget(Video *videoPtr)
     return TCL_OK;
 }
 
+/**
+ * Windows platform specific cleanup. This function is called to permit us
+ * to release any platform specific resources associated with this widget.
+ * It is called after the Tk windows has been destroyed and all the core
+ * memory has been released.
+ * We need to free the memory allocated during VideopCreateWidget here.
+ * We also have to tidy up the filter graph and de-register it from the 
+ * running object table.
+ *
+ * @param memPtr pointer tothe widget instance data
+ */
+
 void 
-VideopDestroy(char *memPtr)
+VideopCleanup(char *memPtr)
 {
     Video *videoPtr = (Video *)memPtr;
     if (videoPtr->platformData != NULL) {
-        VideoPlatformData *p = (VideoPlatformData *)videoPtr->platformData;
-        if (p->pFilterGraph != NULL) {
-            UnregisterFilterGraph(p->dwRegistrationId);
-            p->pFilterGraph->Release();
-            p->pFilterGraph = NULL;
-        }
-
+        ReleasePlatformData((VideoPlatformData *)videoPtr->platformData);
         ckfree((char *)videoPtr->platformData);
         videoPtr->platformData = NULL;
     }
 }
+
+/**
+ * Windows platform specific window destruction.
+ * This function is called just before the Tk window is destroyed. For the windows
+ * implementation we must unsubclass the Tk window.
+ */
+
+void
+VideopDestroy(Video *videoPtr)
+{
+    VideoPlatformData *platformPtr = (VideoPlatformData *)videoPtr->platformData;
+    ReleasePlatformData(platformPtr);
+    if (platformPtr->wndproc != NULL)
+    {
+        HWND hwnd = Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)); 
+        SetWindowLong(hwnd, GWL_WNDPROC, (LONG)platformPtr->wndproc);
+        platformPtr->wndproc = NULL;
+    }
+}
+
+/**
+ *
+ */
 
 int
 InitVideoSource(Video *videoPtr)
@@ -84,42 +145,37 @@ InitVideoSource(Video *videoPtr)
     VideoPlatformData *pPlatformData = (VideoPlatformData *)videoPtr->platformData;
     IVideoWindow *pVideoWindow = 0;
     HRESULT hr = S_OK;
-    int device = 0;
 
+    // Release the current graph and any pointers into it.
+    ReleasePlatformData(pPlatformData);
 
-    if (pPlatformData->pFilterGraph) {
-        UnregisterFilterGraph(pPlatformData->dwRegistrationId);
-        pPlatformData->pFilterGraph->Release();
-        pPlatformData->pFilterGraph = NULL;
-    }
+    int nVideo = -1, nAudio = -1;
+    LPCWSTR sSource = NULL;
+    LPCWSTR sOutput = Tcl_GetUnicode(videoPtr->outputPtr);
 
-    if (Tcl_GetIntFromObj(NULL, videoPtr->sourcePtr, &device) == TCL_OK) {
-        hr = ConstructCaptureGraph(device, &pPlatformData->pFilterGraph);
-    } else {
-        hr = ConstructFileGraph(Tcl_GetUnicode(videoPtr->sourcePtr), &pPlatformData->pFilterGraph);
-    }
+    if (Tcl_GetIntFromObj(NULL, videoPtr->sourcePtr, &nVideo) != TCL_OK)
+        sSource = Tcl_GetUnicode(videoPtr->sourcePtr);
+    if (Tcl_GetIntFromObj(NULL, videoPtr->audioPtr, &nAudio) != TCL_OK)
+        nAudio = -1;
+
+    hr = ConstructCaptureGraph(nVideo, nAudio, sSource, sOutput, &pPlatformData->pFilterGraph);
 
     if (SUCCEEDED(hr)) {
         RegisterFilterGraph(pPlatformData->pFilterGraph, &pPlatformData->dwRegistrationId);
 
-        hr = ConnectVideo(pPlatformData->pFilterGraph,
-            Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)), &pVideoWindow);
+        HWND hwnd = Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)); 
+        hr = ConnectVideo(videoPtr, hwnd, &pVideoWindow);
         if (SUCCEEDED(hr)) {
-
-            if (SUCCEEDED(hr)) {
-                CComPtr<IMediaControl> pMediaControl;
-                hr = pPlatformData->pFilterGraph->QueryInterface(IID_IMediaControl,
-                    reinterpret_cast<void**>(&pMediaControl));
+            // Subclass the tk window so we can recieve graph messages
+            if (pPlatformData->wndproc == NULL) {
+                SetProp(hwnd, TEXT("Tkvideo"), (HANDLE)videoPtr);
+                pPlatformData->wndproc = (WNDPROC)SetWindowLong(hwnd, GWL_WNDPROC, (LONG)VideopWndProc);
             }
 
-            long w, h;
+            long w = 0, h = 0;
             hr = GetVideoSize(pPlatformData->pFilterGraph, &w, &h);
 
             pVideoWindow->put_BorderColor(0xffffff);
-
-            // /* FIX ME */
-            //pVideoWindow->put_Width(w);
-            //pVideoWindow->put_Height(h);
 
             videoPtr->videoHeight = h;
             videoPtr->videoWidth = w;
@@ -128,6 +184,25 @@ InitVideoSource(Video *videoPtr)
     }
 
     return TCL_OK;
+}
+
+void 
+ReleasePlatformData(VideoPlatformData *pPlatformData)
+{
+    if (pPlatformData->pMediaEvent) {
+        pPlatformData->pMediaEvent->SetNotifyWindow((OAHWND)NULL, 0, 0);
+        pPlatformData->pMediaEvent->Release();
+        pPlatformData->pMediaEvent = NULL;
+    }
+    if (pPlatformData->pMediaSeeking) {
+        pPlatformData->pMediaSeeking->Release();
+        pPlatformData->pMediaSeeking = NULL;
+    }
+    if (pPlatformData->pFilterGraph != NULL) {
+        UnregisterFilterGraph(pPlatformData->dwRegistrationId);
+        pPlatformData->pFilterGraph->Release();
+        pPlatformData->pFilterGraph = NULL;
+    }
 }
 
 void
@@ -191,11 +266,24 @@ VideopWidgetObjCmd(ClientData clientData, Tcl_Interp *interp,
         break;
 
     case VIDEO_DEVICES:
-        if (objc != 2) {
-            Tcl_WrongNumArgs(interp, 2, objv, "option");
-            r = TCL_ERROR;
-        } else {
-            r = GetDeviceList(interp);
+        {
+            if (objc < 2 || objc > 3) {
+                Tcl_WrongNumArgs(interp, 2, objv, "?video | audio?");
+                r = TCL_ERROR;
+            } else {
+                CLSID clsid = CLSID_VideoInputDeviceCategory;
+                if (objc == 3) {
+                    const char *type = Tcl_GetString(objv[2]);
+                    if (strcmp("audio", type) == 0)
+                        clsid = CLSID_AudioInputDeviceCategory;
+                    else if (strcmp("video", type) != 0) {
+                        Tcl_WrongNumArgs(interp, 2, objv, "?video | audio?");
+                        r = TCL_ERROR;
+                    }
+                }
+                if (r == TCL_OK)
+                    r = GetDeviceList(interp, clsid);
+            }
         }
         break;
 
@@ -217,9 +305,10 @@ VideopWidgetObjCmd(ClientData clientData, Tcl_Interp *interp,
         if (SUCCEEDED(hr))
             hr = pFilterGraph->QueryInterface(IID_IVideoWindow, reinterpret_cast<void**>(&pVideoWindow));
         if (SUCCEEDED(hr))
-            hr = pFilterGraph->FindFilterByName(SAMPLE_GRABBER_NAME, &pGrabberFilter);
-        if (SUCCEEDED(hr))
-            hr = pGrabberFilter.QueryInterface(&pSampleGrabber);
+        {
+            if (SUCCEEDED( pFilterGraph->FindFilterByName(SAMPLE_GRABBER_NAME, &pGrabberFilter) ))
+                hr = pGrabberFilter.QueryInterface(&pSampleGrabber);
+        }
 
         if (SUCCEEDED(hr)) {
             switch (index) {
@@ -227,7 +316,7 @@ VideopWidgetObjCmd(ClientData clientData, Tcl_Interp *interp,
                 hr = pMediaControl->Run();
                 if (SUCCEEDED(hr))
                     hr = pVideoWindow->put_Visible(OATRUE);
-                if (SUCCEEDED(hr))
+                if (SUCCEEDED(hr) && pSampleGrabber)
                     hr = pSampleGrabber->SetBufferSamples(TRUE);
                 break;
             case VIDEO_PAUSE:
@@ -240,12 +329,72 @@ VideopWidgetObjCmd(ClientData clientData, Tcl_Interp *interp,
                 hr = pMediaControl->Stop();
                 if (SUCCEEDED(hr))
                     pVideoWindow->put_Visible(OAFALSE);
-                if (SUCCEEDED(hr))
+                if (SUCCEEDED(hr) && pSampleGrabber)
                     hr = pSampleGrabber->SetBufferSamples(FALSE);
                 break;                
             }
         }
         r = (long)hr;
+        break;
+    }
+
+    case VIDEO_SEEK:
+    {
+        if (objc != 3) {
+            Tcl_WrongNumArgs(interp, 2, objv, "position");
+            r = TCL_ERROR;
+        } else {
+            pFilterGraph = pPlatformData->pFilterGraph;
+            if (! pFilterGraph) {
+                Tcl_SetObjResult(interp, Tcl_NewStringObj("error: no video source initialized", -1));
+                return TCL_ERROR;
+            }
+
+            if (!pPlatformData->pMediaSeeking) {
+                Tcl_SetObjResult(interp, Tcl_NewStringObj("seeking not supported on this source", -1));
+                r = TCL_ERROR;
+            } else {
+                REFERENCE_TIME t = 0;
+                r = Tcl_GetWideIntFromObj(interp, objv[2], &t);
+                if (r == TCL_OK) {
+                    t *= 10000; // convert from ms to 100ns
+                    pPlatformData->pMediaSeeking->SetPositions(&t, AM_SEEKING_AbsolutePositioning, NULL, AM_SEEKING_NoPositioning);
+                }
+            }
+        }
+        break;
+    }
+
+    case VIDEO_TELL:
+    {
+        if (objc != 2) {
+            Tcl_WrongNumArgs(interp, 2, objv, "");
+            r = TCL_ERROR;
+        } else {
+            pFilterGraph = pPlatformData->pFilterGraph;
+            if (! pFilterGraph) {
+                Tcl_SetObjResult(interp, Tcl_NewStringObj("error: no video source initialized", -1));
+                return TCL_ERROR;
+            }
+
+            if (!pPlatformData->pMediaSeeking) {
+                Tcl_SetObjResult(interp, Tcl_NewStringObj("seeking not supported for this type of source", -1));
+                r = TCL_ERROR;
+            } else {
+                REFERENCE_TIME tDuration, tCurrent, tStop;
+                pPlatformData->pMediaSeeking->SetTimeFormat(&TIME_FORMAT_MEDIA_TIME);
+                pPlatformData->pMediaSeeking->GetDuration(&tDuration);
+                pPlatformData->pMediaSeeking->GetPositions(&tCurrent, &tStop);
+                tDuration /= 10000; tStop /= 10000; tCurrent /= 10000; // convert units from 100ns to ms.
+                Tcl_Obj *resObj = Tcl_NewListObj(0, NULL);
+                r = Tcl_ListObjAppendElement(interp, resObj, Tcl_NewWideIntObj(tCurrent));
+                if (r == TCL_OK)
+                    r = Tcl_ListObjAppendElement(interp, resObj, Tcl_NewWideIntObj(tStop));
+                if (r == TCL_OK)
+                    r = Tcl_ListObjAppendElement(interp, resObj, Tcl_NewWideIntObj(tDuration));
+                Tcl_SetObjResult(interp, resObj);
+            }
+        }
         break;
     }
 
@@ -317,8 +466,20 @@ ShowCapturePinProperties(IGraphBuilder *pFilterGraph, HWND hwnd)
     return hr;
 }
 
-static int 
-GetDeviceList(Tcl_Interp *interp)
+/**
+ * Obtains a list of Direct Show registered devices in a specified category.
+ * For instance CLSID_VideoInputDeviceCategory lists video sources and
+ * or CLSID_AudioInputDeviceCategory will list audio sources.
+ *
+ * @param interp [in] pointer to the tcl interpreter
+ * @param clsidCategory [in] identifier of the device category to list
+ *
+ * @return A tcl result code. The interpreter result is set to a Tcl list
+ *   containing the devices names.
+ */
+
+int 
+GetDeviceList(Tcl_Interp *interp, CLSID clsidCategory)
 {
     CComPtr<ICreateDevEnum> pCreateDevEnum;
     CComPtr<IBindCtx> pctx;
@@ -337,7 +498,7 @@ GetDeviceList(Tcl_Interp *interp)
         listPtr = Tcl_NewListObj(0, NULL);
 
         // bug #4992: returns S_FALSE in the event of failure and sets the pointer NULL.
-        hr = pCreateDevEnum->CreateClassEnumerator(CLSID_VideoInputDeviceCategory, &pEnumMoniker, 0);
+        hr = pCreateDevEnum->CreateClassEnumerator(clsidCategory, &pEnumMoniker, 0);
         while (SUCCEEDED(hr) && pEnumMoniker && hrLoop == S_OK)
         {
             hr = hrLoop = pEnumMoniker->Next(12, pmks, &nmks);
@@ -361,23 +522,184 @@ GetDeviceList(Tcl_Interp *interp)
             Tcl_SetObjResult(interp, listPtr);
         }
     }
-    return SUCCEEDED(hr) ? TCL_OK : TCL_ERROR;;
-
+    return SUCCEEDED(hr) ? TCL_OK : TCL_ERROR;
 }
 
 // -----------------------------------------------------------------
-static HRESULT 
-ConstructFileGraph(LPOLESTR sFilename, IGraphBuilder **ppGraphBuilder)
+
+static HRESULT
+MediaType(LPCWSTR sPath, LPCGUID *ppMediaType, LPCGUID *ppMediaSubType)
 {
-    CComPtr<IGraphBuilder> pGraphBuilder;
-    HRESULT hr = pGraphBuilder.CoCreateInstance(CLSID_FilterGraph);
+    struct MediaTable { LPCWSTR wsz; LPCGUID type; LPCGUID subtype; };
+    MediaTable map[] = {
+        L".avi", NULL,             &MEDIASUBTYPE_Avi,
+        L".wmv", &MEDIATYPE_Video, &MEDIASUBTYPE_Asf,
+        L".mov", &MEDIATYPE_Video, &MEDIASUBTYPE_QTMovie,
+    };
+    LPCWSTR sExt = PathFindExtensionW(sPath);
+    for (int n = 0; sExt && n < sizeof(map) / sizeof(map[0]); n++)
+    {
+        if (wcsnicmp(map[n].wsz, sExt, 4) == 0)
+        {
+            *ppMediaType = map[n].type;
+            *ppMediaSubType = map[n].subtype;
+            return S_OK;
+        }
+    }
+    return E_INVALIDARG;
+}
+
+static HRESULT 
+ConstructCaptureGraph(int DeviceIndex, int AudioIndex, LPCWSTR sSourcePath, LPCWSTR sOutputPath, IGraphBuilder **ppGraph)
+{
+    CComPtr<IGraphBuilder> pGraph;
+    CComPtr<ICaptureGraphBuilder2> pBuilder;
+    bool bFileSource = (sSourcePath && wcslen(sSourcePath) > 0);
+    bool bRecordVideo = (sOutputPath && wcslen(sOutputPath) > 0);
+
+    HRESULT hr = pGraph.CoCreateInstance(CLSID_FilterGraph);
+    if (SUCCEEDED(hr))
+        hr = pBuilder.CoCreateInstance(CLSID_CaptureGraphBuilder2);
+    if (SUCCEEDED(hr))
+        hr = pBuilder->SetFiltergraph(pGraph);
+
+    // If we are to capture the output to a file, then add in the avimux filter
+    // and set the output file destination. Returns pointers to the mux and the
+    // file writer that it creates for us. Can create AVI or ASF
+    CComPtr<IBaseFilter> pMux;
+    if (SUCCEEDED(hr) && !bFileSource && bRecordVideo)
+    {
+        LPCGUID pType = NULL, pSubType = NULL;
+        hr = MediaType(sOutputPath, &pType, &pSubType);
+        if (SUCCEEDED(hr))
+            hr = pBuilder->SetOutputFileName(pSubType, sOutputPath, &pMux, NULL);
+    }
+
+    // Now we put in the source filter. This may be a file source, url source or
+    // a capture device.
+    CComPtr<IBaseFilter> pCaptureFilter;
+    CComPtr<IBaseFilter> pAudioFilter;
+    if (SUCCEEDED(hr))
+    {
+        if (bFileSource)
+        {
+            hr = pGraph->AddSourceFilter(sSourcePath, CAPTURE_FILTER_NAME, &pCaptureFilter);
+        }
+        else
+        {
+            CComPtr<IMoniker> pmk;
+            CComPtr<IBindCtx> pBindContext;
+
+            // Add our input device to the capture graph.
+            if (SUCCEEDED(hr))
+                hr = GetDeviceMoniker(CLSID_VideoInputDeviceCategory, DeviceIndex, &pmk);
+            if (!pmk)
+                hr = E_INVALIDARG;
+            if (SUCCEEDED(hr))
+                hr = CreateBindCtx(0, &pBindContext);
+            if (SUCCEEDED(hr))
+                hr = pmk->BindToObject(pBindContext, NULL, IID_IBaseFilter, reinterpret_cast<void**>(&pCaptureFilter));
+            if (SUCCEEDED(hr))
+                hr = pGraph->AddFilter(pCaptureFilter, CAPTURE_FILTER_NAME);
+
+            pmk.Release(); pBindContext.Release();
+            if (SUCCEEDED(hr) && AudioIndex != -1)
+            {
+                HRESULT hrA = GetDeviceMoniker(CLSID_AudioInputDeviceCategory, AudioIndex, &pmk);
+                if (SUCCEEDED(hrA))
+                    hrA = CreateBindCtx(0, &pBindContext);
+                if (SUCCEEDED(hrA))
+                    hrA = pmk->BindToObject(pBindContext, NULL, IID_IBaseFilter, reinterpret_cast<void**>(&pAudioFilter));
+                if (SUCCEEDED(hrA))
+                    hrA = pGraph->AddFilter(pAudioFilter, AUDIO_FILTER_NAME);
+            }
+        }
+    }
 
     // Add in a Sample Grabber to the graph
     CComPtr<IBaseFilter> pGrabberFilter;
     if (SUCCEEDED(hr))
-        hr = pGrabberFilter.CoCreateInstance(CLSID_SampleGrabber);
+    {
+        hr = CreateCompatibleSampleGrabber(&pGrabberFilter);
+        if (SUCCEEDED(hr))
+            hr = pGraph->AddFilter(pGrabberFilter, SAMPLE_GRABBER_NAME);
+    }
+
+    // Add a video renderer to the graph
+    CComPtr<IBaseFilter> pRenderFilter;
     if (SUCCEEDED(hr))
-        hr = pGraphBuilder->AddFilter(pGrabberFilter, SAMPLE_GRABBER_NAME);
+    {
+        hr = pRenderFilter.CoCreateInstance(CLSID_VideoMixingRenderer9);
+        if (FAILED(hr))
+            hr = pRenderFilter.CoCreateInstance(CLSID_VideoRenderer);
+        if (SUCCEEDED(hr))
+            hr = pGraph->AddFilter(pRenderFilter, RENDERER_FILTER_NAME);
+    }
+
+    // Could add in a compressor here.
+
+
+    // Add in a preview
+    if (SUCCEEDED(hr))
+    {
+        if (bFileSource) 
+        {
+            LPCGUID pType = NULL, pSubType = NULL;
+            hr = MediaType(sSourcePath, &pType, &pSubType);
+            hr = pBuilder->RenderStream(NULL, pType, pCaptureFilter, pGrabberFilter, pRenderFilter);
+        }
+        else
+            hr = pBuilder->RenderStream(&PIN_CATEGORY_PREVIEW, &MEDIATYPE_Video, pCaptureFilter, pGrabberFilter, pRenderFilter);
+    }
+
+    // Now connect up the video source to the mux for saving. (The mux is already connected to the writer).
+    if (SUCCEEDED(hr) && pMux)
+        hr = pBuilder->RenderStream(&PIN_CATEGORY_CAPTURE, &MEDIATYPE_Video, pCaptureFilter, NULL, pMux);
+
+    // Connect audio (if any)
+    if (SUCCEEDED(hr))
+    {
+        if (pAudioFilter && pMux)
+        {
+            CComPtr<IBaseFilter> pTeeFilter;
+            pTeeFilter.CoCreateInstance(CLSID_InfTee);
+            if (pTeeFilter) pGraph->AddFilter(pTeeFilter, NULL);
+            if (pMux)
+                pBuilder->RenderStream(NULL, &MEDIATYPE_Audio, pAudioFilter, pTeeFilter, pMux);
+        }
+        else if (pAudioFilter)
+        {
+            pBuilder->RenderStream(NULL, &MEDIATYPE_Audio, pAudioFilter, NULL, NULL);
+        }
+        else
+        {
+            pBuilder->RenderStream(NULL, &MEDIATYPE_Audio, pCaptureFilter, NULL, NULL);
+        }
+    }
+
+    if (SUCCEEDED(hr))
+        hr = pGraph.CopyTo(ppGraph);
+    return hr;
+
+}
+
+/**
+ * This function obtains the colour depth of the current desktop
+ * window and configures an instance of the Sample Grabber filter
+ * to be compatible with the desktop display. This means that we
+ * will recover useful bitmaps from the grabber. This also ensures
+ * that the filter is the penultimate filter in the graph and causes
+ * the grabber to be placed @em after the AVI decompression filter.
+ *
+ * @param ppFilter [out] pointer is set to the newly configured
+ *  sample grabber.
+ */
+
+HRESULT
+CreateCompatibleSampleGrabber(IBaseFilter **ppFilter)
+{
+    CComPtr<IBaseFilter> pGrabberFilter;
+    HRESULT hr = pGrabberFilter.CoCreateInstance(CLSID_SampleGrabber);
     if (SUCCEEDED(hr))
     {
         // Set the grabber to grab video stills.
@@ -387,11 +709,13 @@ ConstructFileGraph(LPOLESTR sFilename, IGraphBuilder **ppGraphBuilder)
         HDC hdc = ::GetDC(HWND_DESKTOP);
         int iBitDepth = GetDeviceCaps(hdc, BITSPIXEL);
 
-        switch (iBitDepth) {
+        switch (iBitDepth)
+        {
         case  8: mt.subtype = MEDIASUBTYPE_RGB8;   break;
         case 24: mt.subtype = MEDIASUBTYPE_RGB24;  break;
         case 32: mt.subtype = MEDIASUBTYPE_RGB32;  break;
-        case 16: {
+        case 16:
+            {
                 int r = 0, g = 0, b = 0;
                 mt.subtype = MEDIASUBTYPE_RGB565;
                 if (GetRGBBitsPerPixel(hdc, &r, &g, &b) && g == 5)
@@ -405,218 +729,30 @@ ConstructFileGraph(LPOLESTR sFilename, IGraphBuilder **ppGraphBuilder)
         CComQIPtr<ISampleGrabber> pSampleGrabber(pGrabberFilter);
         if (pSampleGrabber)
             hr = pSampleGrabber->SetMediaType(&mt);
-    }
-
-    // Add a video renderer to the graph
-    CComPtr<IBaseFilter> pRenderFilter;
-    if (SUCCEEDED(hr))
-        hr = pRenderFilter.CoCreateInstance(CLSID_VideoRenderer);
-    if (SUCCEEDED(hr))
-        hr = pGraphBuilder->AddFilter(pRenderFilter, RENDERER_FILTER_NAME);
-    
-    // begin rendering our file.
-    if (SUCCEEDED(hr))
-        hr = pGraphBuilder->RenderFile(sFilename, NULL);
-    if (SUCCEEDED(hr))
-        hr = pGraphBuilder.CopyTo(ppGraphBuilder);
-    return hr;
-}
-
-/**
- *  Build a DirectX Video Capture graph for the given video input device.
- *  The graph will contain a Sample Grabber and a VideoRenderer.
- */
-static HRESULT
-ConstructCaptureGraph(int DeviceIndex, IGraphBuilder **ppGraphBuilder)
-{
-    CComPtr<IGraphBuilder> pGraphBuilder;
-    CComPtr<IMediaControl> pMediaControl;
-    CComPtr<IMoniker> pmk;
-    CComPtr<IBindCtx> pBindContext;
-    CComPtr<IBaseFilter> pCaptureFilter;
-
-    HRESULT hr = pGraphBuilder.CoCreateInstance(CLSID_FilterGraph);
-
-    // Add our input device to the capture graph.
-    if (SUCCEEDED(hr))
-        hr = GetDeviceMoniker(DeviceIndex, &pmk);
-    if (SUCCEEDED(hr))
-        hr = CreateBindCtx(0, &pBindContext);
-    if (SUCCEEDED(hr))
-        hr = pmk->BindToObject(pBindContext, NULL, IID_IBaseFilter, reinterpret_cast<void**>(&pCaptureFilter));
-    if (SUCCEEDED(hr))
-    {
-        CComPtr<IPropertyBag> pCaptureBag;
-        CComVariant vCaptureName;
-        if (SUCCEEDED( pmk->BindToStorage(pBindContext, NULL, IID_IPropertyBag, reinterpret_cast<void**>(&pCaptureBag)) ))
-            pCaptureBag->Read(L"FriendlyName", &vCaptureName, 0);
-
-        hr = pGraphBuilder->AddFilter(pCaptureFilter, CAPTURE_FILTER_NAME);
-    }
-
-    // Add a video renderer to the graph
-    CComPtr<IBaseFilter> pRenderFilter;
-    if (SUCCEEDED(hr))
-        hr = pRenderFilter.CoCreateInstance(CLSID_VideoRenderer);
-    if (SUCCEEDED(hr))
-        hr = pGraphBuilder->AddFilter(pRenderFilter, RENDERER_FILTER_NAME);
-
-    // Add in a Sample Grabber to the graph
-    CComPtr<IBaseFilter> pGrabberFilter;
-    if (SUCCEEDED(hr))
-        hr = pGrabberFilter.CoCreateInstance(CLSID_SampleGrabber);
-    if (SUCCEEDED(hr))
-        hr = pGraphBuilder->AddFilter(pGrabberFilter, SAMPLE_GRABBER_NAME);
-
-    if (SUCCEEDED(hr))
-        hr = ConnectFilterGraph(pGraphBuilder, pCaptureFilter, pGrabberFilter, pRenderFilter);
-
-    // Return the completed capture graph
-    if (SUCCEEDED(hr))
-        hr = pGraphBuilder.CopyTo(ppGraphBuilder);
-
-    return hr;
-}
-
-/**
- *  Reconnect the filter graph by keeping a reference to our filters and throwing away 
- *  the current graph. We then create a new graph with out filters and connect it.
- */
-
-HRESULT
-ReconnectFilterGraph(IGraphBuilder *pGraphBuilder)
-{
-    ATLASSERT(pGraphBuilder);
-    HRESULT hr = S_OK;
-
-    CComPtr<ICaptureGraphBuilder2> pCaptureGraphBuilder2;
-    CComPtr<IBaseFilter> pCaptureFilter, pGrabberFilter, pRenderFilter;
-
-    if (SUCCEEDED(hr))
-        hr = pGraphBuilder->FindFilterByName(CAPTURE_FILTER_NAME, &pCaptureFilter);
-    if (SUCCEEDED(hr))
-        hr = pGraphBuilder->FindFilterByName(SAMPLE_GRABBER_NAME, &pGrabberFilter);
-    if (SUCCEEDED(hr))
-        hr = pGraphBuilder->FindFilterByName(RENDERER_FILTER_NAME, &pRenderFilter);
-
-    // Remove all filters from the graph.
-    if (SUCCEEDED(hr))
-    {
-        CComPtr<IEnumFilters> pEnumFilters;
-        IBaseFilter *pFilters[12];
-        ULONG nFilters = 0;
-        HRESULT hrLoop = S_OK;
-        hr = pGraphBuilder->EnumFilters(&pEnumFilters);
-        while (SUCCEEDED(hr) && hrLoop == S_OK)
-        {
-            hr = hrLoop = pEnumFilters->Next(12, pFilters, &nFilters);
-            for (unsigned long n = 0; SUCCEEDED(hr) && n < nFilters; n++)
-            {
-                hr = pGraphBuilder->RemoveFilter(pFilters[n]);
-                pFilters[n]->Release(), pFilters[n] = 0;
-            }
-            if (hrLoop == S_OK)
-                hr = pEnumFilters->Reset();
-        }
-    }
-    
-    // Re-add our filters.
-    if (SUCCEEDED(hr))
-        hr = pGraphBuilder->AddFilter(pCaptureFilter, CAPTURE_FILTER_NAME);
-    if (SUCCEEDED(hr))
-        hr = pGraphBuilder->AddFilter(pGrabberFilter, SAMPLE_GRABBER_NAME);
-    if (SUCCEEDED(hr))
-        hr = pGraphBuilder->AddFilter(pRenderFilter, RENDERER_FILTER_NAME);
-
-    if (SUCCEEDED(hr))
-        hr = ConnectFilterGraph(pGraphBuilder, pCaptureFilter, pGrabberFilter, pRenderFilter);
-
-    return hr;
-}
-
-static HRESULT
-ConnectFilterGraph(IGraphBuilder *pGraphBuilder,
-                   IBaseFilter *pCaptureFilter, IBaseFilter *pGrabberFilter, IBaseFilter *pRenderFilter)
-{
-    HRESULT hr = S_OK;
-
-    AM_MEDIA_TYPE mt;
-    ZeroMemory(&mt, sizeof(AM_MEDIA_TYPE));
-    mt.majortype = MEDIATYPE_Video;
-    HDC hdc = ::GetDC(HWND_DESKTOP);
-    int iBitDepth = GetDeviceCaps(hdc, BITSPIXEL);
-
-    switch (iBitDepth) {
-    case  8: mt.subtype = MEDIASUBTYPE_RGB8;   break;
-    case 24: mt.subtype = MEDIASUBTYPE_RGB24;  break;
-    case 32: mt.subtype = MEDIASUBTYPE_RGB32;  break;
-    case 16:
-        {
-            int r = 0, g = 0, b = 0;
-            mt.subtype = MEDIASUBTYPE_RGB565;
-            if (GetRGBBitsPerPixel(hdc, &r, &g, &b) && g == 5)
-                mt.subtype = MEDIASUBTYPE_RGB555;
-        }
-        break;
-    default: mt.subtype = MEDIASUBTYPE_RGB24; break;
-    }
-    ::ReleaseDC(HWND_DESKTOP, hdc);
-
-    CComPtr<IPin> pCapturePin, pRenderPin, pGrabIn, pGrabOut;
-    if (SUCCEEDED(hr))
-        hr = FindPinByCategory(pCaptureFilter, PIN_CATEGORY_CAPTURE, &pCapturePin);
-    if (SUCCEEDED(hr))
-        hr = FindPinByDirection(pRenderFilter, PINDIR_INPUT, &pRenderPin);
-    if (SUCCEEDED(hr))
-        hr = FindPinByDirection(pGrabberFilter, PINDIR_INPUT, &pGrabIn);
-    if (SUCCEEDED(hr))
-        hr = FindPinByDirection(pGrabberFilter, PINDIR_OUTPUT, &pGrabOut);
-
-    CComQIPtr<ISampleGrabber> pSampleGrabber(pGrabberFilter);
-    if (pSampleGrabber)
-        hr = pSampleGrabber->SetMediaType(&mt);
-
-    if (SUCCEEDED(hr))
-        hr = pGraphBuilder->Connect(pCapturePin, pGrabIn);
-    if (SUCCEEDED(hr))
-        hr = pGraphBuilder->Connect(pGrabOut, pRenderPin);
-
-    if (SUCCEEDED(hr))
-    {
-        // The point of this section is to get any upstream filters placed into 
-        // the graph for us. We don't especially care if the capture filter supports
-        // compression, because the smart connect will handle this for us. However,
-        // we do need the CaptureGraphBuilder to build the upstream part of the graph
-        // otherwise it won't give us the crossbar filter later on.
-
-        CComPtr<ICaptureGraphBuilder2> pCaptureGraphBuilder2;
-        CComPtr<IBaseFilter> pFilter;
-        CComPtr<IAMVideoCompression> pCompression;
-
-        hr = pCaptureGraphBuilder2.CoCreateInstance(CLSID_CaptureGraphBuilder2);
         if (SUCCEEDED(hr))
-            hr = pCaptureGraphBuilder2->SetFiltergraph(pGraphBuilder);
-        if (SUCCEEDED(hr))
-            pCaptureGraphBuilder2->FindInterface(&PIN_CATEGORY_CAPTURE,
-                                                 &MEDIATYPE_Video,
-                                                 pCaptureFilter,
-                                                 IID_IAMVideoCompression,
-                                                 reinterpret_cast<void**>(&pCompression));
+            hr = pGrabberFilter.CopyTo(ppFilter);
     }
-
-    ATLASSERT(SUCCEEDED(hr) && _T("Unable to connect capture pin in ConnectFilterGraph"));
     return hr;
 }
 
 /**
  * Connect the capture graph to a window. This window needs
- * to adjust itself for the correct size.
+ * to adjust itself for the correct size. Note that some types of
+ * graph may not have a video window object. For instance a graph
+ * based on an audio-only sample.
+ *
+ * @param pGraph [in] interface to the current filter graph
+ * @param hwnd [in] handle to the window we will display in.
+ * @param ppVideoWindow [out] pointer to the IVideoWindow interface of this
+ *    filter graph if available.
+ * @return S_OK on success. E_INVALIDARG if the hwnd parameter is invalid.
  */
+
 HRESULT
-ConnectVideo(IGraphBuilder *pGraphBuilder, HWND hwnd, IVideoWindow **ppVideoWindow)
+ConnectVideo(Video *videoPtr, HWND hwnd, IVideoWindow **ppVideoWindow)
 {
+    VideoPlatformData *platformPtr = (VideoPlatformData *)videoPtr->platformData;
     CComPtr<IVideoWindow> pVideoWindow;
-    CComPtr<IMediaEventEx> pMediaEvent;
     RECT rc;
     
     HRESULT hr = E_INVALIDARG;
@@ -624,9 +760,26 @@ ConnectVideo(IGraphBuilder *pGraphBuilder, HWND hwnd, IVideoWindow **ppVideoWind
     {
         ::GetClientRect(hwnd, &rc);
 
-        hr = pGraphBuilder->QueryInterface(&pMediaEvent);
+        // Connect our window for graph events
+        if (SUCCEEDED( platformPtr->pFilterGraph->QueryInterface(&platformPtr->pMediaEvent) ))
+        {
+            hr = platformPtr->pMediaEvent->SetNotifyWindow((OAHWND)hwnd, WM_GRAPHNOTIFY, 0);
+        }
+
+        // Get a seeking pointer only if seeking is supported.
+        if (SUCCEEDED( platformPtr->pFilterGraph->QueryInterface(&platformPtr->pMediaSeeking) ))
+        {
+            DWORD grfCaps = AM_SEEKING_CanSeekAbsolute | AM_SEEKING_CanGetDuration;
+            if (platformPtr->pMediaSeeking->CheckCapabilities(&grfCaps) != S_OK)
+            {
+                platformPtr->pMediaSeeking->Release();
+                platformPtr->pMediaSeeking = NULL;
+            }
+        }
+
+        // Configure the overlay window.
         if (SUCCEEDED(hr))
-            hr = pGraphBuilder->QueryInterface(&pVideoWindow);
+            hr = platformPtr->pFilterGraph->QueryInterface(&pVideoWindow);
         if (SUCCEEDED(hr))
             hr = pVideoWindow->put_Owner((OAHWND)hwnd);
         if (SUCCEEDED(hr))
@@ -641,18 +794,32 @@ ConnectVideo(IGraphBuilder *pGraphBuilder, HWND hwnd, IVideoWindow **ppVideoWind
     return hr;
 }
 
+/**
+ * Obtains the width and height in pixels of the video renderer filter
+ *
+ * @param pGraph [in] pointer to the current filter graph
+ * @param pWidth [out] set to the width in pixels of the video image
+ * @param pHeight [out] set to the height in pixels of the video image
+ *
+ * @return S_OK on success or S_FALSE if the graph does not support video.
+ */
 
 HRESULT
-GetVideoSize(IGraphBuilder *pFilterGraph, long *pWidth, long *pHeight)
+GetVideoSize(IGraphBuilder *pGraph, long *pWidth, long *pHeight)
 {
     HRESULT hr = S_FALSE;
-    if (pFilterGraph)
+    if (pGraph)
     {
         CComPtr<IBaseFilter> pFilter;
         CComPtr<IPin> pPin;
         AM_MEDIA_TYPE mt;
 
-        hr = pFilterGraph->FindFilterByName(RENDERER_FILTER_NAME, &pFilter);
+        CComPtr<IVideoWindow> pVideoWindow;
+        CComPtr<IBaseFilter> pRenderFilter;
+        if (SUCCEEDED( hr = pGraph->QueryInterface(&pVideoWindow) ))
+            hr = pVideoWindow.QueryInterface(&pRenderFilter);
+
+        hr = pGraph->FindFilterByName(RENDERER_FILTER_NAME, &pFilter);
         if (SUCCEEDED(hr))
             hr = FindPinByDirection(pFilter, PINDIR_INPUT, &pPin);
         if (SUCCEEDED(hr))
@@ -675,60 +842,25 @@ GetVideoSize(IGraphBuilder *pFilterGraph, long *pWidth, long *pHeight)
 }
 
 /**
- *  Disconnect all the connected pins for each filter.
- */
-
-HRESULT
-DisconnectFilterGraph(IFilterGraph *pFilterGraph)
-{
-    CComPtr<IEnumFilters> pEnumFilters;
-    HRESULT hr = pFilterGraph->EnumFilters(&pEnumFilters);
-    if (SUCCEEDED(hr))
-    {
-        IBaseFilter *pFilter;
-        while ((hr = pEnumFilters->Next(1, &pFilter, NULL)) == S_OK)
-        {
-            hr = DisconnectPins(pFilter);
-            pFilter->Release();
-        }
-    }
-    return hr;
-}
-
-/**
- *  Disconnect all pins on the filter.
- */
-
-HRESULT
-DisconnectPins(IBaseFilter *pFilter)
-{
-    CComPtr<IEnumPins> pEnumPins;
-    HRESULT hr = pFilter->EnumPins(&pEnumPins);
-    if (SUCCEEDED(hr))
-    {
-        IPin *pPin;
-        while ((hr = pEnumPins->Next(1, &pPin, NULL)) == S_OK)
-        {
-            hr = pPin->Disconnect();
-            pPin->Release();
-        }
-    }
-    return hr;
-}
-
-/*
- * Take an image snapshot from the sample grabber and create a
+ * This function takes an image from the sample grabber and creates a
  * Tk photo using the returned data.
+ *
+ * @param interp [in] pointer to the tcl interpreter
+ * @param pGraph [in] pointer to the filter graph
+ * @param imageName [in] optional name to use for the new Tk image
+ *
+ * @return TCL_OK on success. On failure TCL_ERROR and the interpreter
+ *  result is set to describe the error.
  */
 
 int
-GrabSample(Tcl_Interp *interp, IGraphBuilder *pFilterGraph, LPCSTR imageName)
+GrabSample(Tcl_Interp *interp, IGraphBuilder *pGraph, LPCSTR imageName)
 {
     CComPtr<IBaseFilter> pGrabberFilter;
     CComPtr<ISampleGrabber> pSampleGrabber;
     int r = TCL_OK;
 
-    HRESULT hr = pFilterGraph->FindFilterByName(SAMPLE_GRABBER_NAME, &pGrabberFilter);
+    HRESULT hr = pGraph->FindFilterByName(SAMPLE_GRABBER_NAME, &pGrabberFilter);
     if (SUCCEEDED(hr))
         hr = pGrabberFilter.QueryInterface(&pSampleGrabber);
 
@@ -826,11 +958,46 @@ GrabSample(Tcl_Interp *interp, IGraphBuilder *pFilterGraph, LPCSTR imageName)
         }
     }
     if (FAILED(hr)) {
-        Tcl_SetResult(interp, "argh!", TCL_STATIC);
+        Tcl_SetResult(interp, "no image created: the current source does not support image capture.", TCL_STATIC);
         r = TCL_ERROR;
     }
 
     return r;
+}
+
+LRESULT APIENTRY
+VideopWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    Video *videoPtr = (Video *)GetProp(hwnd, TEXT("Tkvideo"));
+    VideoPlatformData *platformPtr = (VideoPlatformData *)videoPtr->platformData;
+    if (uMsg == WM_GRAPHNOTIFY && platformPtr->pMediaEvent != NULL)
+    {
+        long evCode = 0, lParam1 = 0, lParam2 = 0;
+        while (SUCCEEDED( platformPtr->pMediaEvent->GetEvent(&evCode, &lParam1, &lParam2, 0) ))
+        {
+            switch (evCode)
+            {
+            case EC_PAUSED:
+                SendVirtualEvent(videoPtr->tkwin, "VideoPaused");
+                break;
+            case EC_COMPLETE:
+                SendVirtualEvent(videoPtr->tkwin, "VideoComplete");
+                break;
+            case EC_USERABORT:
+                SendVirtualEvent(videoPtr->tkwin, "VideoUserAbort");
+                break;
+            case EC_VIDEO_SIZE_CHANGED:
+                {
+                    int width = LOWORD(lParam1);
+                    int height = HIWORD(lParam1);
+                    SendConfigureEvent(videoPtr->tkwin, 0, 0, width, height);
+                }
+                break;
+            }
+            platformPtr->pMediaEvent->FreeEventParams(evCode, lParam1, lParam2);
+        }
+    }
+    return CallWindowProc(platformPtr->wndproc, hwnd, uMsg, wParam, lParam);
 }
 
 // -------------------------------------------------------------------------
