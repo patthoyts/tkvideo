@@ -1,0 +1,24 @@
+RELEASE NOTES                                              -*- text -*-
+-----------------------------------------------------------------------
+
+Version 1.2.0                                              (16-Sep-2005)
+-------------
+
+This version supports recording to file. AVI and WMV files are
+supported at the moment and more may follow. If a source provides an
+audio stream then this will also be connected up. Much better support
+for playing video files and it is now possible to seek within video
+streams that support seeking (eg: file sources). Some events are now
+raised to Tk when the video state changes.
+
+Version 1.1.0                                              (12-Apr-2005)
+-------------
+
+This version adds support for capturing snapshots from a device source as
+a Tk image.
+
+Version 1.0.0                                               (9-May-2004)
+-------------
+
+The initial public release provides a simple Tk widget that displays a
+webcam video stream.

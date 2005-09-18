@@ -1,3 +1,11 @@
+/* dshow_utils.h - Copyright (C) 2003 Pat Thoyts <patthoyts@users.sf.net>
+ *
+ * --------------------------------------------------------------------------
+ * See the file "license.terms" for information on usage and redistribution
+ * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
+ * --------------------------------------------------------------------------
+ * $Id$
+ */
 
 #ifndef _DSHOW_UTILS_H_INCLUDE
 #define _DSHOW_UTILS_H_INCLUDE

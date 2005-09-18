@@ -1,3 +1,13 @@
+2005-09-17  Pat Thoyts  <patthoyts@users.sourceforge.net>
+
+	* all:  --- Release 1.2.0 ---
+	
+	* all: Added copyright and license information to all files. Wrote
+	a readme file. Implemented the -anchor configuration
+	option. Cleaned up whitespace indentation. Added caching of more
+	graph pointers. Discovered that the ASF filter _requires_ an audio
+	input for writing wmv/asf files. Cleaned up the demo.
+
 2005-09-15  Pat Thoyts  <patthoyts@users.sourceforge.net>
 
 	* generic/tkvideo.h: Implemented support for recording data to

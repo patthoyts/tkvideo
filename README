@@ -1,0 +1,55 @@
+README                                                     -*- text -*-
+
+tkvideo - a Video Widget for the Tk Toolkit
+-------------------------------------------
+
+This project aims to provide a video display widget for the Tk toolkit
+that can be used to display video data from files or from devices like
+webcams or TV input.
+
+At this time the widget only works for Windows. On this platform it
+uses the DirectShow APIs to obtain and display video and so can
+support any video sources supported by DirectX. This includes most
+webcams and a number of common file types including AVI and WMV
+files.
+
+A related project is the QuickTimeTcl project which supports QuickTime
+sources (.mov files, streaming video and some devices) on the Mac and
+Windows.
+
+INSTALLATION
+------------
+
+The tkvideo package is provided as source code or a pre-compiled zip
+archive is available. A Tcl starkit version may also be available for
+use with tclkit (http://equi4.com/tclkit.html).
+
+To install the binary distribution you should locate your Tcl library
+folder. This is available as the global variable tcl_library in a Tcl
+shell. Unpack the zip archive in this folder and the package will be
+available for use.
+
+To compile the source code, you will require Microsoft Visual C++ 6.0,
+a recent version of the Platform SDK and the DirectX SDK. Read the
+comments in the file win/makefile.vc for additional details.
+
+All files may be obtained from the project site at
+http://developer.berlios.de/projects/tkvideo
+
+Additionally the source code is maintained in a Subversion
+repository. See http://developer.berlios.de/svn/?group_id=1738 for
+information on connecting to this repository.
+
+AUTHORS
+-------
+
+The tkvideo package has been written by 
+Pat Thoyts <patthoyts@users.sourceforge.net>
+
+LICENSE
+-------
+
+Please see the file license.terms for details of the software
+license. If you require an alternative license you should contact the
+authors of the software.
+

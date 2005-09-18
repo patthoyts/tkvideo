@@ -167,7 +167,8 @@ STUBPREFIX      = $(PROJECT)stub
 DLLOBJS = \
 	$(TMP_DIR)\tkvideo.obj \
 	$(TMP_DIR)\winvideo.obj \
-	$(TMP_DIR)\dshow_utils.obj
+	$(TMP_DIR)\dshow_utils.obj \
+	$(TMP_DIR)\tkvideo.res
 
 ##
 ## This package requires the DirectX SDK to be installed.
@@ -263,7 +264,9 @@ INCLUDES	= $(TCL_INCLUDES) $(TK_INCLUDES) \
 BASE_CLFAGS	= $(cflags) $(cdebug) $(crt) $(INCLUDES)
 CON_CFLAGS	= $(cflags) $(cdebug) $(crt) -DCONSOLE
 TCL_CFLAGS	= -DUSE_TCL_STUBS -DUSE_TK_STUBS \
-		  -DVERSION="\"$(DOTVERSION)\"" $(BASE_CLFAGS) $(OPTDEFINES)
+		  -DPACKAGE_VERSION="\"$(DOTVERSION)\"" \
+		  -DPACKAGE_NAME="\"$(PROJECT)\"" \
+		  $(BASE_CLFAGS) $(OPTDEFINES)
 
 #---------------------------------------------------------------------
 # Link flags
@@ -304,7 +307,7 @@ baselibs   = $(TCLSTUBLIB) $(TKSTUBLIB) $(DXSDKLIB)
 #---------------------------------------------------------------------
 
 !IF "$(TESTPAT)" != ""
-TESTFLAGS = -file $(TESTPAT)
+TESTFLAGS = $(TESTFLAGS) -file $(TESTPAT)
 !ENDIF
 
 #---------------------------------------------------------------------
@@ -316,14 +319,31 @@ $(PROJECT): setup $(PRJLIB)
 install:    install-binaries install-libraries install-demos install-docs
 
 
-test: setup $(PROJECT)
-	set TCL_LIBRARY=$(ROOT)/library
+# Tests need to ensure we load the right dll file we
+# have to handle the output differently on Win9x.
+#
 !if "$(OS)" == "Windows_NT"  || "$(MSVCDIR)" == "IDE"
-	$(TCLSH) "$(ROOT)/tests/all.tcl" $(TESTFLAGS)
+test: setup $(PROJECT)
+        set TCL_LIBRARY=$(ROOT)/library
+        $(WISH) <<
+package require Tk
+load [file join [file normalize {$(OUT_DIR)}] $(PRJLIBNAME)]
+cd "$(ROOT)/tests"
+set argv "$(TESTFLAGS)"
+source all.tcl
+<<
 !else
-	@echo Please wait while the tests are collected...
-	$(TCLSH) "$(ROOT)/tests/all.tcl" $(TESTFLAGS) > tests.log
-	type tests.log | more
+test: setup $(PROJECT)
+        echo Please wait while the test results are collected
+        set TCL_LIBRARY=$(ROOT)/library
+        $(WISH) << >tests.log
+package require Tk
+load [file join [file normalize {$(OUT_DIR)}] $(PRJLIBNAME)]
+cd "$(ROOT)/tests"
+set argv "$(TESTFLAGS)"
+source all.tcl
+<<
+        type tests.log | more
 !endif
 
 demo: setup $(PROJECT)
@@ -347,8 +367,9 @@ starkit: $(PRJLIB)
 	@echo package ifneeded $(PROJECT) $(DOTVERSION) [list load [file join $$dir $(PRJLIBNAME)]] > $(PRJVFS)\lib\$(PROJECT)\pkgIndex.tcl
 	@type << >$(PRJVFS)\main.tcl
 package require starkit
-if {[starkit::startup] == "sourced"} {return}
-source [file join $$::starkit::topdir demos demo.tcl]
+if {[starkit::startup] ne "sourced"} {
+    source [file join $$::starkit::topdir demos demo.tcl]
+}
 <<
 	@sdx wrap $(PRJKIT)
 	@del $(PRJKIT:.kit=.bat)
@@ -389,6 +410,9 @@ $<
 
 {$(WINDIR)}.rc{$(TMP_DIR)}.res:
 	$(rc32) -fo $@ -r -i "$(GENERICDIR)" -D__WIN32__ \
+                -DCOMMAVERSION=$(DOTVERSION:.=,),0 \
+                -DDOTVERSION=\"$(DOTVERSION)\" \
+                -DVERSION=\"$(VERSION)$(SUFX)\" \
 !if $(DEBUG)
 	-d DEBUG \
 !endif
@@ -454,6 +478,7 @@ install-docs:
 
 clean:
 	@if exist $(TMP_DIR)\nul $(RMDIR) $(TMP_DIR)
+	@if exist $(WINDIR)\version.vc del $(WINDIR)\version.vc
 
 realclean: clean
 	@if exist $(OUT_DIR)\nul $(RMDIR) $(OUT_DIR)
