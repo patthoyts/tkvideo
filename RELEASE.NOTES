@@ -1,6 +1,13 @@
 RELEASE NOTES                                              -*- text -*-
 -----------------------------------------------------------------------
 
+Version 1.2.1                                              (20-Sep-2005)
+-------------
+
+A pair of memory leaks were present in the previous versions in image
+capture. These have been fixed. Also fixed is capturing images on
+displays with 16 bit colour depth.
+
 Version 1.2.0                                              (16-Sep-2005)
 -------------
 

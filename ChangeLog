@@ -1,5 +1,7 @@
 2005-09-20  Pat Thoyts  <patthoyts@users.sourceforge.net>
 
+	* all: --- Release 1.2.1 ---
+	
 	* winvideo.cpp: Force image capture to RGB32 format. The
 	conversion to a Tk image can't handle the 16 bit formats.
 
