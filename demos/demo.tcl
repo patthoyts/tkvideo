@@ -160,6 +160,10 @@ proc Record {Application} {
     }
 }
 
+proc onComplete {Application} {
+    Pause $Application
+}
+
 proc onConfigure {W x y w h} {
     puts stderr "Configure $W +${x}+${y}+${w}x${h}"
     $W configure -width $w -height $h
@@ -307,7 +311,7 @@ proc Main {mw {filename {}}} {
     set app(video) $v
 
     bind $v <<VideoPaused>>   { puts stderr "VideoPaused" }
-    bind $v <<VideoComplete>> { %W pause }
+    bind $v <<VideoComplete>> [list onComplete $Application]
     bind $v <<VideoUserAbort>> { puts stderr "VideoUserAbort" }
     bind $v <Configure> { onConfigure %W %x %y %w %h }
     
@@ -326,21 +330,21 @@ proc Main {mw {filename {}}} {
                          -command [list Seek $Application]]
     if {$nottk} {$app(slider) configure -state disabled} else {$app(slider) state disabled}
     
-    set app(rewd) [button $buttons.rewind -image $images(2) -width 5 \
+    set app(rewd) [button $buttons.rewind -image $images(2) \
                        -command [list Rewind $Application]]
-    set app(back) [button $buttons.back -image $images(0) -width 5 \
+    set app(back) [button $buttons.back -image $images(0) \
                        -command [list Skip $Application -250]]
-    set app(play) [button $buttons.play   -image $images(4) -width 5 \
+    set app(play) [button $buttons.play   -image $images(4) \
                        -command [list Start $Application]]
-    set app(fwd)  [button $buttons.fwd  -image $images(1) -width 5 \
+    set app(fwd)  [button $buttons.fwd  -image $images(1) \
                        -command [list Skip $Application 250]]
-    set app(ffwd) [button $buttons.ffwd   -image $images(3) -width 5 \
+    set app(ffwd) [button $buttons.ffwd   -image $images(3) \
                        -command [list FastForward $Application]]
-    set app(stop) [button $buttons.stop   -image $images(6) -width 5 \
+    set app(stop) [button $buttons.stop   -image $images(6) \
                        -command [list Stop $Application]]
-    set app(snap) [button $buttons.snap   -image $images(8) -width 5 \
+    set app(snap) [button $buttons.snap   -image $images(8) \
                        -command [list Snapshot $Application]]
-    set app(prop) [button $buttons.props  -image $images(9) -width 5 \
+    set app(prop) [button $buttons.props  -image $images(9) \
                        -command [list $v prop filter]]
     checkbutton $buttons.stretch -text Stretch \
         -variable [set Application](stretch) \

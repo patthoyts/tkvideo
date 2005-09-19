@@ -122,9 +122,9 @@ VideopCleanup(char *memPtr)
 }
 
 /**
- * Windows platform specific window destruction.
- * This function is called just before the Tk window is destroyed. For the windows
- * implementation we must unsubclass the Tk window.
+ * Windows platform specific window destruction.  This function is
+ * called just before the Tk window is destroyed. For the windows
+ * implementation we must unsubclass the Tk window.  
  */
 
 void
@@ -137,15 +137,18 @@ VideopDestroy(Video *videoPtr)
         HWND hwnd = Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)); 
         SetWindowLong(hwnd, GWL_WNDPROC, (LONG)platformPtr->wndproc);
         platformPtr->wndproc = NULL;
+        RemoveProp(hwnd, TEXT("Tkvideo"));
     }
 }
 
 /**
- *
+ * Called when the video or audio source has been changed or when the output
+ * file has been changed. We construct the DirectShow graph appropriate to
+ * the specified options and get it ready to run.
  */
 
 int
-InitVideoSource(Video *videoPtr)
+VideopInitializeSource(Video *videoPtr)
 {
     VideoPlatformData *pPlatformData = (VideoPlatformData *)videoPtr->platformData;
     HRESULT hr = S_OK;
@@ -731,26 +734,9 @@ CreateCompatibleSampleGrabber(IBaseFilter **ppFilter)
         AM_MEDIA_TYPE mt;
         ZeroMemory(&mt, sizeof(AM_MEDIA_TYPE));
         mt.majortype = MEDIATYPE_Video;
-        HDC hdc = ::GetDC(HWND_DESKTOP);
-        int iBitDepth = GetDeviceCaps(hdc, BITSPIXEL);
-
-        switch (iBitDepth)
-        {
-        case  8: mt.subtype = MEDIASUBTYPE_RGB8;   break;
-        case 24: mt.subtype = MEDIASUBTYPE_RGB24;  break;
-        case 32: mt.subtype = MEDIASUBTYPE_RGB32;  break;
-        case 16:
-            {
-                int r = 0, g = 0, b = 0;
-                mt.subtype = MEDIASUBTYPE_RGB565;
-                if (GetRGBBitsPerPixel(hdc, &r, &g, &b) && g == 5)
-                    mt.subtype = MEDIASUBTYPE_RGB555;
-            }
-            break;
-        default: mt.subtype = MEDIASUBTYPE_RGB24; break;
-        }
-        ::ReleaseDC(HWND_DESKTOP, hdc);
-
+        // For capture to Tk we want to force RGB32. The image conversion code
+        // can deal with RGB24 and RGB32 but not the other formats.
+        mt.subtype = MEDIASUBTYPE_RGB32;
         CComQIPtr<ISampleGrabber> pSampleGrabber(pGrabberFilter);
         if (pSampleGrabber)
             hr = pSampleGrabber->SetMediaType(&mt);
@@ -915,7 +901,10 @@ GrabSample(Video *videoPtr, LPCSTR imageName)
     if (SUCCEEDED(hr))
     {
         pData = new BYTE[cbData];
-        hr = pSampleGrabber->GetCurrentBuffer(&cbData, reinterpret_cast<long*>(pData));
+        if (pData == NULL)
+            hr = E_OUTOFMEMORY;
+        if (SUCCEEDED(hr))
+            hr = pSampleGrabber->GetCurrentBuffer(&cbData, reinterpret_cast<long*>(pData));
         if (SUCCEEDED(hr))
         {
             // Create a photo image.
@@ -952,8 +941,8 @@ GrabSample(Video *videoPtr, LPCSTR imageName)
                 block.pixelPtr = pData;
 
 #if TK_MINOR_VERSION >= 3
-                // We have to fix the alpha channel. By default it is undefined and tends to
-                // produce a transparent image.
+                // We have to fix the alpha channel. By default it is
+                // undefined and tends to produce a transparent image.
                 for (LPBYTE p = block.pixelPtr; p < block.pixelPtr+cbData; p += block.pixelSize)
                     *(p + block.offset[3]) = 0xff;
 #endif
@@ -971,6 +960,7 @@ GrabSample(Video *videoPtr, LPCSTR imageName)
                         CopyMemory(pBot, pTop, cbRow);
                         CopyMemory(pTop, pTmp, cbRow);
                     }
+                    delete [] pTmp;
                 }
 
                 Tk_PhotoPutBlock(
@@ -979,8 +969,9 @@ GrabSample(Video *videoPtr, LPCSTR imageName)
 #endif
                                  img, &block,
                                  0, 0, bih.biWidth, bih.biHeight, TK_PHOTO_COMPOSITE_SET);
-            }        
+            }
         }
+        delete [] pData;
     }
     if (FAILED(hr)) {
         if (errObj == NULL)
@@ -1026,6 +1017,11 @@ VideopWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     }
     return CallWindowProc(platformPtr->wndproc, hwnd, uMsg, wParam, lParam);
 }
+
+/**
+ * Convert windows errors into a Tcl string object including a specified
+ * prefix.
+ */
 
 static Tcl_Obj *
 Win32Error(const char * szPrefix, HRESULT hr)

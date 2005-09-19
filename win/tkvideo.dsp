@@ -43,7 +43,7 @@ CFG=TKVIDEO - WIN32 DEBUG
 # PROP Intermediate_Dir "tkvideo___Win32_Release"
 # PROP Cmd_Line "nmake -f Makefile.vc INSTALLDIR=c:\opt\tcl OPTS=none all"
 # PROP Rebuild_Opt "/a"
-# PROP Target_File "Release/tkvideo120.dll"
+# PROP Target_File "Release/tkvideo121.dll"
 # PROP Bsc_Name ""
 # PROP Target_Dir ""
 
@@ -64,7 +64,7 @@ CFG=TKVIDEO - WIN32 DEBUG
 # PROP Intermediate_Dir "tkvideo___Win32_Debug"
 # PROP Cmd_Line "nmake -f Makefile.vc INSTALLDIR=c:\opt\tcl OPTS=symbols,msvcrt all"
 # PROP Rebuild_Opt "/a"
-# PROP Target_File "Debug/tkvideo120g.dll"
+# PROP Target_File "Debug/tkvideo121g.dll"
 # PROP Bsc_Name ""
 # PROP Target_Dir ""
 
@@ -116,6 +116,10 @@ SOURCE=..\generic\tkvideo.h
 # Begin Source File
 
 SOURCE=..\demos\demo.tcl
+# End Source File
+# Begin Source File
+
+SOURCE=.\makefile.vc
 # End Source File
 # Begin Source File
 

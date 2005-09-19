@@ -160,7 +160,7 @@ Please `cd` to its location first.
 PROJECT = tkvideo
 !include "rules.vc"
 
-DOTVERSION      = 1.2.0
+DOTVERSION      = 1.2.1
 VERSION         = $(DOTVERSION:.=)
 STUBPREFIX      = $(PROJECT)stub
 
@@ -261,12 +261,12 @@ crt = -MT
 
 INCLUDES	= $(TCL_INCLUDES) $(TK_INCLUDES) \
 		  -I"$(WINDIR)" -I"$(GENERICDIR)" -I"$(DXSDKINC)"
-BASE_CLFAGS	= $(cflags) $(cdebug) $(crt) $(INCLUDES)
+BASE_CFLAGS	= $(cflags) $(cdebug) $(crt) $(INCLUDES)
 CON_CFLAGS	= $(cflags) $(cdebug) $(crt) -DCONSOLE
 TCL_CFLAGS	= -DUSE_TCL_STUBS -DUSE_TK_STUBS \
 		  -DPACKAGE_VERSION="\"$(DOTVERSION)\"" \
 		  -DPACKAGE_NAME="\"$(PROJECT)\"" \
-		  $(BASE_CLFAGS) $(OPTDEFINES)
+		  $(BASE_CFLAGS) $(OPTDEFINES)
 
 #---------------------------------------------------------------------
 # Link flags
@@ -358,12 +358,17 @@ setup:
 
 PRJVFS=$(PROJECT)$(VERSION).vfs
 PRJKIT=$(PRJVFS:.vfs=.kit)
+SITELIB=c:\opt\tcl\site-lib
+TILEDIR=tile0.6
+
 starkit: $(PRJLIB)
 	@if not exist $(PRJVFS)\nul mkdir $(PRJVFS)
+	@if not exist $(PRJVFS)\demos\nul mkdir $(PRJVFS)\demos
 	@if not exist $(PRJVFS)\lib\nul mkdir $(PRJVFS)\lib
 	@if not exist $(PRJVFS)\lib\$(PROJECT)\nul mkdir $(PRJVFS)\lib\$(PROJECT)
 	@$(CPY) $(PRJLIB) $(PRJVFS)\lib\$(PROJECT) >NUL
 	@$(CPY) $(ROOT)\demos $(PRJVFS)\demos >NUL
+	@if exist $(SITELIB)\$(TILEDIR)\nul $(CPY) $(SITELIB)\$(TILEDIR) $(PRJVFS)\lib\$(TILEDIR) >NUL
 	@echo package ifneeded $(PROJECT) $(DOTVERSION) [list load [file join $$dir $(PRJLIBNAME)]] > $(PRJVFS)\lib\$(PROJECT)\pkgIndex.tcl
 	@type << >$(PRJVFS)\main.tcl
 package require starkit
@@ -372,7 +377,7 @@ if {[starkit::startup] ne "sourced"} {
 }
 <<
 	@sdx wrap $(PRJKIT)
-	@del $(PRJKIT:.kit=.bat)
+	@if exist $(PRJKIT:.kit=.bat) del $(PRJKIT:.kit=.bat)
 	@echo Created $(PRJKIT)
 
 $(PRJLIB): $(DLLOBJS)
@@ -424,8 +429,9 @@ $<
 !endif
 	$<
 
+DTPLITE=dtplite
 {$(DOCDIR)}.man{$(DOCDIR)}.html:
-	mpexpand html $< $@
+	$(DTPLITE) -o $@ html $<
         @set TCL_LIBRARY=$(ROOT)/library
         @$(TCLSH) <<
 set name $(@:\=/)

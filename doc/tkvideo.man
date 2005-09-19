@@ -1,10 +1,10 @@
-[manpage_begin tkvideo n 1.1.0]
+[manpage_begin tkvideo n 1.2.1]
 [copyright {2004, Pat Thoyts}]
 [comment {link rel="stylesheet" href="manpage.css" type="text/css"}]
 [moddesc   {tkvideo}]
 [titledesc {Tk video widget}]
 [require Tk 8.4]
-[require tkvideo [opt 1.1.0]]
+[require tkvideo [opt 1.2]]
 [description]
 [para]
 
@@ -20,7 +20,7 @@ extend the backend in the future to support other platforms.
 [call [cmd "tkvideo"] [arg "pathName"] [opt "[arg \"option\"] [arg \"value\"] \"...\""]]
 
 Create a new instance of a video widget and configures it using the
-provides options and their values.
+provided options and their values.
 
 [list_end]
 
@@ -84,12 +84,26 @@ specified. If no name is provided then an automatic name is provided
 using the normal "image photo create" command. The command returns the
 name of the Tk image created.
 
+[call [arg "pathName"] [method "tell"]]
+
+Returns a three element list giving the current position, the stop
+position and the maximum position for the current stream. The stop
+position is not currently available to be changed but is the location
+that the current playback will halt at.
+
+[call [arg "pathName"] [method "seek"] [arg "position"]]
+
+Moves the current seek position to the specified location. The start
+or the stream will always be 0 and the end of the stream is provided
+as the third list item returned by the [cmd tell] command.
+
 [list_end]
 
 
 [section "STANDARD WIDGET OPTIONS"]
 [list_begin tkoption]
 
+[tkoption_def -anchor anchor Anchor]
 [tkoption_def -background background Background]
 [tkoption_def -cursor cursor Cursor]
 [tkoption_def -height height Height]
@@ -105,11 +119,40 @@ name of the Tk image created.
 [tkoption_def -source source Source]
 
 This option sets the index of the device to use as a source or may be
-set to the filename of a file source.
+set to the filename of a file source. At this time WMV and AVI file
+sources are supported. Some image types can also be used if
+required. See the [cmd "devices video"] command for the list of available
+capture sources.
+
+[tkoption_def -audiosource audiosource AudioSource]
+
+Set the audio source. The [cmd "devices audio"] command provides a
+list of available audio sources and an index into this list should be
+provided here.
+
+[tkoption_def -output output Output]
+
+If a file name is provided then the video stream may also be saved to
+file. WMV and AVI files are supported. Note that WMV files require an
+audio input. AVI files may be video only. The type of file is
+determined from the file name extension. Set to the empty string to
+disable file saving.
+[nl]
+When recording to file, the file will only be closed and properly
+completed after the [cmd stop] command has been called.
 
 [tkoption_def -stretch stretch Stretch]
 
-I forget.
+The configured video source will have a native size. If this option is
+false then the video display area will be the video native size and
+any additional widget space is filled with the background specified
+for the -background option. The -anchor option is also used to
+position the video area within the widget.
+[nl]
+If this option is true then the display area is stretched or shrunk to
+fill the widget area. In this case then the -anchor option is ignored,
+the scrollcommands will not be called and there will be no background
+visible.
 
 [list_end]
 

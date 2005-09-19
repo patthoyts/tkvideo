@@ -255,8 +255,9 @@ VideoWidgetObjCmd(ClientData clientData, Tcl_Interp *interp,
 
 /* ---------------------------------------------------------------------- */
 
-static int VideoConfigure(Tcl_Interp *interp, Video *videoPtr,
-                          int objc, Tcl_Obj *CONST objv[])
+static int
+VideoConfigure(Tcl_Interp *interp, Video *videoPtr,
+    int objc, Tcl_Obj *CONST objv[])
 {
     Tk_Window tkwin = videoPtr->tkwin;
     Tk_SavedOptions savedOptions;
@@ -290,7 +291,7 @@ static int VideoConfigure(Tcl_Interp *interp, Video *videoPtr,
             if (!Tk_IsMapped(tkwin)) {
                 Tk_MakeWindowExist(tkwin);
             }
-            InitVideoSource(videoPtr);
+            VideopInitializeSource(videoPtr);
         }
 
         VideoCalculateGeometry(videoPtr);
@@ -316,8 +317,9 @@ VideoCalculateGeometry(Video *videoPtr)
     height = (videoPtr->height > 0) ? videoPtr->height : videoPtr->videoHeight;
     Tk_GeometryRequest(videoPtr->tkwin, width, height);
 
-    // If the visible region is smaller than the video size then set offset to the
-    // difference. If there is enough space to show the video then offset is 0.
+    // If the visible region is smaller than the video size then set
+    // offset to the difference. If there is enough space to show the
+    // video then offset is 0.
     visible_x = Tk_Width(videoPtr->tkwin);
     maxoff_x = videoPtr->videoWidth - visible_x;
     if (videoPtr->offset.x > maxoff_x) videoPtr->offset.x = maxoff_x;
