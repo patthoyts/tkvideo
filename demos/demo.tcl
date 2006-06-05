@@ -91,12 +91,34 @@ proc UpdatePosition {Application} {
     catch {
         foreach {cur stp dur} [$app(video) tell] break
         set app(position) [expr {$cur / 1000.0}]
+        SetScaleLabel $app(slider) $app(sliderlabel) \
+            [set Application](poslabel) $cur
         if {!$nottk} {
             $app(slider) configure -value $app(position)
         }
     }
     set app(after) [after 100 [list UpdatePosition $Application]]
 }
+
+proc SetScaleLabel {scalew labelw varname value} {
+    set $varname [DisplayTime $value]
+    foreach {x y} [$scalew coords] break
+    foreach {sw sh sx sy} [split [winfo geometry $scalew] {x +}] break
+    set tw [winfo width $labelw]
+    set x [expr {$x - ($tw / 2)}]
+    if {$x < $sx} {set x $sx}
+    if {$x + $tw > $sx + $sw} {set x [expr {$sx + $sw - $tw}]}
+    place $labelw -x $x -y [expr {$sy - [winfo height $labelw]}]
+}
+
+proc DisplayTime {time} {
+    set hrs [expr {int($time) / 3600000}]
+    set min [expr {(int($time) % 3600000) / 60000}]
+    set sec [expr {(int($time) % 60000) / 1000}]
+    set ms  [expr {int($time) % 1000}]
+    return [format "%02d:%02d:%02d:%03d" $hrs $min $sec $ms]
+}
+
 
 proc Seek {Application value} {
     upvar #0 $Application app
@@ -269,7 +291,8 @@ proc Init {} {
     if {!$init} {
         font create Btn -family Arial -size 14
         font create Web -family Webdings -size 14
-        
+        font create Tim -family Courier -size 8
+
         set image [image create photo -data $imgdata]
         for {set n 0} {$n < 10} {incr n} {
             set images($n) [image create photo]
@@ -278,7 +301,7 @@ proc Init {} {
         }
         
         if {!$nottk} {
-            foreach class {scrollbar scale button checkbutton} {
+            foreach class {scrollbar scale button checkbutton label} {
                 rename ::$class ::tk::$class
                 interp alias {} ::$class {} ::ttk::$class
             }
@@ -286,6 +309,11 @@ proc Init {} {
         set init 1
     }
     return
+}
+
+proc ::bgerror {msg} {
+    tk_messageBox -icon error -title "Application Error" \
+	    -message $msg
 }
 
 # -------------------------------------------------------------------------
@@ -299,7 +327,8 @@ proc Main {mw {filename {}}} {
     set Application [namespace current]::demo[incr uid]
     upvar #0 $Application app
     array set app [list main $mw stretch 1 videoindex 0 \
-                       audioindex "No audio" savefile {}]
+                       audioindex "No audio" savefile {} \
+                       poslabel [DisplayTime 0] ]
 
     wm title $mw {Tk video widget demo}
     wm iconname $mw {Tkvideo}
@@ -325,9 +354,11 @@ proc Main {mw {filename {}}} {
     set sx [scrollbar $mw.sx  -orient horizontal -command [list $v xview]]
     $v configure -xscrollcommand [list $sx set] -yscrollcommand [list $sy set]
 
+    set app(sliderlabel) [label $mw.float \
+                              -textvariable [set Application](poslabel)]
     set app(slider) [scale $mw.pos -orient horizontal -from 0 -to 0 \
                          -variable [set Application](position) \
-                         -command [list Seek $Application]]
+                         -command [list Seek $Application]];#  -showvalue 0
     if {$nottk} {$app(slider) configure -state disabled} else {$app(slider) state disabled}
     
     set app(rewd) [button $buttons.rewind -image $images(2) \
@@ -356,7 +387,7 @@ proc Main {mw {filename {}}} {
     
     grid $v        $sy   -sticky news
     grid $sx       -     -sticky news
-    grid $app(slider) -  -sticky news
+    grid $app(slider) -  -sticky news -pady {20 0}
     grid $buttons  -     -sticky news
     
     grid columnconfigure $mw 0 -weight 1

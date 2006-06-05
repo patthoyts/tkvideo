@@ -82,14 +82,30 @@ static void VideoCleanup(char *memPtr);
 static void VideoDisplay(ClientData clientData);
 static void VideoObjEventProc(ClientData clientData, XEvent *evPtr);
 static int  VideoConfigure(Tcl_Interp *interp, Video *videoPtr, int objc, Tcl_Obj *CONST objv[]);
-static int  VideoXviewSubCmd(Tcl_Interp *interp, Video *videoPtr,
-                             int objc, Tcl_Obj *CONST objv[]);
-static int  VideoYviewSubCmd(Tcl_Interp *interp, Video *videoPtr,
-                             int objc, Tcl_Obj *CONST objv[]);
+static int  VideoWidgetCgetCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[]);
+static int  VideoWidgetConfigureCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[]);
+static int  VideoWidgetXviewCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[]);
+static int  VideoWidgetYviewCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[]);
 static int  VideoWorldChanged(ClientData clientData);
 static void VideoCalculateGeometry(Video *videoPtr);
 static void VideoUpdateVScrollbar(Video* videoPtr);
 static void VideoUpdateHScrollbar(Video* videoPtr);
+
+/* ---------------------------------------------------------------------- */
+
+struct Ensemble {
+    const char *name;          /* subcommand name */
+    Tcl_ObjCmdProc *command;   /* subcommand implementation OR */
+    struct Ensemble *ensemble; /* subcommand ensemble */
+};
+
+struct Ensemble VideoWidgetEnsemble[] = {
+    { "configure", VideoWidgetConfigureCmd, NULL },
+    { "cget",      VideoWidgetCgetCmd, NULL },
+    { "xview",     VideoWidgetXviewCmd, NULL },
+    { "yview",     VideoWidgetYviewCmd, NULL },
+    { NULL, NULL, NULL }
+};
 
 /* ---------------------------------------------------------------------- */
 
@@ -179,76 +195,84 @@ VideoObjCmd(ClientData clientData, Tcl_Interp *interp,
 
 /* ---------------------------------------------------------------------- */
 
+/*
+ * Process the ensemble structure and any commands not found are passed along to the platform code.
+ */
 static int
-VideoWidgetObjCmd(ClientData clientData, Tcl_Interp *interp,
-    int objc, Tcl_Obj *CONST objv[])
+VideoWidgetObjCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[])
+{
+    struct Ensemble *ensemble = VideoWidgetEnsemble;
+    int optPtr = 1;
+    int index;
+
+    while (optPtr < objc) {
+        if (Tcl_GetIndexFromObjStruct(interp, objv[optPtr], ensemble, sizeof(ensemble[0]), "command", 0, &index) != TCL_OK)
+        {
+            if (optPtr == 1)
+                return VideopWidgetObjCmd(clientData, interp, objc, objv);
+            else
+                return TCL_ERROR;
+        }
+
+        if (ensemble[index].command) {
+            return ensemble[index].command(clientData, interp, objc, objv);
+        }
+        ensemble = ensemble[index].ensemble;
+        ++optPtr;
+    }
+    Tcl_WrongNumArgs(interp, optPtr, objv, "option ?arg arg...?");
+    return TCL_ERROR;
+}
+
+static int
+VideoWidgetCgetCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[])
 {
     Video *videoPtr = (Video *)clientData;
     Tk_Window tkwin = videoPtr->tkwin;
     Tcl_Obj *resultPtr = NULL;
-    int r = TCL_OK, index;
-    
-    static CONST84 char *options[] = {
-        "cget", "configure", "xview", "yview", "propertypage",
-        "stop", "start", "pause", "devices", "picture", "seek",
-        "tell", (char *)NULL
-    };
-
-    if (objc < 2) {
-        Tcl_WrongNumArgs(interp, 1, objv, "option ?arg arg ...?");
-        return TCL_ERROR;
-    }
-
-    if (Tcl_GetIndexFromObj(interp, objv[1], options, "command", 0, &index)
-        != TCL_OK) {
-        return TCL_ERROR;
-    }
+    int r = TCL_OK;
 
     Tcl_Preserve(clientData);
 
-    switch (index) {
-        case VIDEO_CGET:
-            if (objc != 3) {
-                Tcl_WrongNumArgs(interp, 2, objv, "option");
-                r = TCL_ERROR;
-            } else {
-                resultPtr = Tk_GetOptionValue(interp, (char *)videoPtr, 
-                    videoPtr->optionTable, objv[2], tkwin);
-                if (resultPtr == NULL)
-                    r = TCL_ERROR;
-                else
-                    Tcl_SetObjResult(interp, resultPtr);
-            }
-            break;
-            
-        case VIDEO_CONFIGURE:
-            if (objc < 4) {
-                Tcl_Obj *optionPtr = NULL;
-                if (objc == 3)
-                    optionPtr = objv[2];
-                resultPtr = Tk_GetOptionInfo(interp, (char *)videoPtr,
-                    videoPtr->optionTable, (Tcl_Obj*)optionPtr, tkwin);
-                r = (resultPtr != NULL) ? TCL_OK : TCL_ERROR;
-            } else {
-                r = VideoConfigure(interp, videoPtr, objc - 2, objv + 2);
-            }            
-            if (resultPtr != NULL)
-                Tcl_SetObjResult(interp, resultPtr);
-            break;
-            
-        case VIDEO_XVIEW:
-            r = VideoXviewSubCmd(interp, videoPtr, objc, objv);
-            break;
-
-        case VIDEO_YVIEW:
-            r = VideoYviewSubCmd(interp, videoPtr, objc, objv);
-            break;
-
-        default:
-            /* call platform specific function */
-            r = VideopWidgetObjCmd(clientData, interp, index, objc, objv);
+    if (objc != 3) {
+        Tcl_WrongNumArgs(interp, 2, objv, "option");
+        r = TCL_ERROR;
+    } else {
+        resultPtr = Tk_GetOptionValue(interp, (char *)videoPtr, 
+            videoPtr->optionTable, objv[2], tkwin);
+        if (resultPtr == NULL)
+            r = TCL_ERROR;
+        else
+            Tcl_SetObjResult(interp, resultPtr);
     }
     
+    Tcl_Release(clientData);
+    return r;
+}
+
+static int
+VideoWidgetConfigureCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[])
+{
+    Video *videoPtr = (Video *)clientData;
+    Tk_Window tkwin = videoPtr->tkwin;
+    Tcl_Obj *resultPtr = NULL;
+    int r = TCL_OK;
+
+    Tcl_Preserve(clientData);
+
+    if (objc < 4) {
+        Tcl_Obj *optionPtr = NULL;
+        if (objc == 3)
+            optionPtr = objv[2];
+        resultPtr = Tk_GetOptionInfo(interp, (char *)videoPtr,
+            videoPtr->optionTable, (Tcl_Obj*)optionPtr, tkwin);
+        r = (resultPtr != NULL) ? TCL_OK : TCL_ERROR;
+    } else {
+        r = VideoConfigure(interp, videoPtr, objc - 2, objv + 2);
+    }            
+    if (resultPtr != NULL)
+        Tcl_SetObjResult(interp, resultPtr);
+
     Tcl_Release(clientData);
     return r;
 }
@@ -472,12 +496,9 @@ VideoDisplay(ClientData clientData)
  */
 
 static int
-VideoYviewSubCmd(
-    Tcl_Interp *interp,          /* Pointer to the calling Tcl interpreter */
-    Video *videoPtr,             /* Pointer to the widget private structure */
-    int objc,                    /* Number of arguments in the objv array */
-    Tcl_Obj *CONST objv[])       /* Array of arguments to the procedure */
+VideoWidgetYviewCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[])
 {
+    Video *videoPtr = (Video *)clientData;
     Tk_Window tkwin = videoPtr->tkwin;
     int count, type, offset = -1, r = TCL_OK;
     double fraction, fraction2;
@@ -550,12 +571,9 @@ VideoYviewSubCmd(
  */
 
 static int
-VideoXviewSubCmd(
-    Tcl_Interp *interp,          /* Pointer to the calling Tcl interpreter */
-    Video *videoPtr,             /* Pointer to the widget private structure */
-    int objc,                    /* Number of arguments in the objv array */
-    Tcl_Obj *CONST objv[])       /* Array of arguments to the procedure */
+VideoWidgetXviewCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[])
 {
+    Video *videoPtr = (Video *)clientData;
     Tk_Window tkwin = videoPtr->tkwin;
     int count, type, r = TCL_OK;
     double fraction, fraction2;

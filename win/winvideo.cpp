@@ -15,6 +15,7 @@
  */
 
 #define WIN32_LEAN_AND_MEAN
+#define OEMRESOURCE 
 #include <windows.h>
 #include <shlwapi.h>
 #include "tkvideo.h"
@@ -40,21 +41,26 @@
  */
 
 typedef struct {
-    IGraphBuilder *pFilterGraph;
-    IMediaEventEx *pMediaEvent;
-    IMediaSeeking *pMediaSeeking;
-    IMediaControl *pMediaControl;
-    IVideoWindow  *pVideoWindow;
-    DWORD          dwRegistrationId;
-    WNDPROC        wndproc;
+    IGraphBuilder   *pFilterGraph;
+    IMediaEventEx   *pMediaEvent;
+    IMediaSeeking   *pMediaSeeking;
+    IMediaControl   *pMediaControl;
+    IVideoWindow    *pVideoWindow;
+    IAMVideoControl *pAMVideoControl;
+    IPin            *pStillPin;
+    HBITMAP          hbmOverlay;
+    DWORD            dwRegistrationId;
+    WNDPROC          wndproc;
 } VideoPlatformData;
 
 static HRESULT ShowCaptureFilterProperties(IGraphBuilder *pFilterGraph, HWND hwnd);
 static HRESULT ShowCapturePinProperties(IGraphBuilder *pFilterGraph, HWND hwnd);
 static HRESULT ConstructCaptureGraph(int nDevice, int nAudio, LPCWSTR sSource, LPCWSTR sOutput, IGraphBuilder **ppGraphBuilder);
 static HRESULT CreateCompatibleSampleGrabber(IBaseFilter **ppFilter);
+static HRESULT GetCaptureMediaFormat(IGraphBuilder *pGraph, int index, AM_MEDIA_TYPE **ppmt);
 static HRESULT ConnectVideo(Video *videoPtr, HWND hwnd, IVideoWindow **ppVideoWindow);
 static HRESULT GetVideoSize(Video *videoPtr, long *pWidth, long *pHeight);
+static void FreeMediaType(AM_MEDIA_TYPE *pmt);
 static void ReleasePlatformData(VideoPlatformData *pPlatformData);
 static int GrabSample(Video *videoPtr, LPCSTR imageName);
 static int GetDeviceList(Tcl_Interp *interp, CLSID clsidCategory);
@@ -62,6 +68,41 @@ LRESULT APIENTRY VideopWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 static Tcl_Obj *Win32Error(const char * szPrefix, HRESULT hr);
 static void ComputeAnchor(Tk_Anchor anchor, Tk_Window tkwin,
                           int padX, int padY, int innerWidth, int innerHeight, int *xPtr, int *yPtr);
+static int PhotoToHBITMAP(Tcl_Interp *interp, const char *imageName, HBITMAP *phBitmap);
+static HRESULT AddOverlay(Video *videoPtr);
+static HRESULT WriteBitmapFile(HDC hdc, HBITMAP hbmp, LPCTSTR szFilename);
+
+static int VideopWidgetPropPageCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[]);
+static int VideopWidgetDevicesCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[]);
+static int VideopWidgetControlCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[]);
+static int VideopWidgetSeekCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[]);
+static int VideopWidgetTellCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[]);
+static int VideopWidgetPictureCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[]);
+static int VideopWidgetInvalidCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[]);
+static int VideopWidgetOverlayCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[]);
+
+struct Ensemble {
+    const char *name;          /* subcommand name */
+    Tcl_ObjCmdProc *command;   /* subcommand implementation OR */
+    struct Ensemble *ensemble; /* subcommand ensemble */
+};
+
+struct Ensemble VideoWidgetEnsemble[] = {
+    { "configure",    VideopWidgetInvalidCmd,  NULL },  /* we need to list the platform independent */
+    { "cget",         VideopWidgetInvalidCmd,  NULL },  /* widget commands so that they appear in   */
+    { "xview",        VideopWidgetInvalidCmd,  NULL },  /* the list when an error is returned       */
+    { "yview",        VideopWidgetInvalidCmd,  NULL },  /*                                          */
+    { "propertypage", VideopWidgetPropPageCmd, NULL },
+    { "devices",      VideopWidgetDevicesCmd,  NULL },
+    { "start",        VideopWidgetControlCmd,  NULL },
+    { "stop",         VideopWidgetControlCmd,  NULL },
+    { "pause",        VideopWidgetControlCmd,  NULL },
+    { "seek",         VideopWidgetSeekCmd,     NULL },
+    { "tell",         VideopWidgetTellCmd,     NULL },
+    { "picture",      VideopWidgetPictureCmd,  NULL },
+    { "overlay",      VideopWidgetOverlayCmd,  NULL }, /* this should probably be a configure option */
+    { NULL, NULL, NULL }
+};
 
 /**
  * Windows platform specific package initialization. We only need to setup for COM
@@ -187,7 +228,7 @@ VideopInitializeSource(Video *videoPtr)
 
             if (pPlatformData->pVideoWindow)
                 pPlatformData->pVideoWindow->put_BorderColor(0xffffff);
-        }
+       }
     }
 
     if (FAILED(hr))
@@ -201,10 +242,22 @@ VideopInitializeSource(Video *videoPtr)
 void 
 ReleasePlatformData(VideoPlatformData *pPlatformData)
 {
+    if (pPlatformData->pFilterGraph) {
+        pPlatformData->pFilterGraph->Abort();
+    }
+    
     if (pPlatformData->pMediaEvent) {
         pPlatformData->pMediaEvent->SetNotifyWindow((OAHWND)NULL, 0, 0);
         pPlatformData->pMediaEvent->Release();
         pPlatformData->pMediaEvent = NULL;
+    }
+    if (pPlatformData->pAMVideoControl) {
+        pPlatformData->pAMVideoControl->Release();
+        pPlatformData->pAMVideoControl = NULL;
+    }
+    if (pPlatformData->pStillPin) {
+        pPlatformData->pStillPin->Release();
+        pPlatformData->pStillPin = NULL;
     }
     if (pPlatformData->pMediaSeeking) {
         pPlatformData->pMediaSeeking->Release();
@@ -247,197 +300,333 @@ VideopCalculateGeometry(Video *videoPtr)
     }
 }
 
-int 
-VideopWidgetObjCmd(ClientData clientData, Tcl_Interp *interp,
-                   int index, int objc, Tcl_Obj *CONST objv[])
+int
+VideopWidgetObjCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[])
 {
     Video *videoPtr = (Video *)clientData;
     VideoPlatformData *pPlatformData = (VideoPlatformData *)videoPtr->platformData;
-    IGraphBuilder *pFilterGraph = NULL;
-    int r = TCL_OK;
+    struct Ensemble *ensemble = VideoWidgetEnsemble;
+    int optPtr = 1;
+    int index;
 
     if (pPlatformData == NULL) {
         Tcl_SetObjResult(interp, Tcl_NewStringObj("platform data not initialized yet", -1));
         return TCL_ERROR;
     }
 
-    switch (index) {
-    case VIDEO_PROPERTYPAGE:
-        if (objc != 3) {
-            Tcl_WrongNumArgs(interp, 2, objv, "\"filter\" or \"pin\"");
-            r = TCL_ERROR;
-        } else {
-            char * page = Tcl_GetString(objv[2]);
-            pFilterGraph = pPlatformData->pFilterGraph;
-            if (strncmp("filter", page, 6) == 0) {
-                ShowCaptureFilterProperties(pFilterGraph, Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)));
-            } else if (strncmp("pin", page, 3) == 0) {
-                ShowCapturePinProperties(pFilterGraph, Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)));
-            } else {
-                Tcl_WrongNumArgs(interp, 2, objv, "\"filter\" or \"pin\"");
-                r = TCL_ERROR;
-            }
-        }
-        break;
-
-    case VIDEO_DEVICES:
+    while (optPtr < objc) {
+        if (Tcl_GetIndexFromObjStruct(interp, objv[optPtr], ensemble, sizeof(ensemble[0]), "command", 0, &index) != TCL_OK)
         {
-            if (objc < 2 || objc > 3) {
-                Tcl_WrongNumArgs(interp, 2, objv, "?video | audio?");
-                r = TCL_ERROR;
-            } else {
-                CLSID clsid = CLSID_VideoInputDeviceCategory;
-                if (objc == 3) {
-                    const char *type = Tcl_GetString(objv[2]);
-                    if (strcmp("audio", type) == 0)
-                        clsid = CLSID_AudioInputDeviceCategory;
-                    else if (strcmp("video", type) != 0) {
-                        Tcl_WrongNumArgs(interp, 2, objv, "?video | audio?");
-                        r = TCL_ERROR;
-                    }
-                }
-                if (r == TCL_OK)
-                    r = GetDeviceList(interp, clsid);
-            }
-        }
-        break;
-
-    case VIDEO_STOP:
-    case VIDEO_START: 
-    case VIDEO_PAUSE:
-    {
-        pFilterGraph = pPlatformData->pFilterGraph;
-        if (! pFilterGraph) {
-            Tcl_SetObjResult(interp, Tcl_NewStringObj("error: no video source initialized", -1));
             return TCL_ERROR;
         }
 
-        CComPtr<IBaseFilter> pGrabberFilter;
-        CComPtr<ISampleGrabber> pSampleGrabber;
-        HRESULT hr = S_OK;
-        if (SUCCEEDED( pFilterGraph->FindFilterByName(SAMPLE_GRABBER_NAME, &pGrabberFilter) ))
-            hr = pGrabberFilter.QueryInterface(&pSampleGrabber);
-
-        if (SUCCEEDED(hr)) {
-            switch (index) {
-            case VIDEO_START:
-                if (SUCCEEDED(hr) && pPlatformData->pVideoWindow)
-                    hr = pPlatformData->pVideoWindow->put_Visible(OATRUE);
-                if (SUCCEEDED(hr) && pSampleGrabber)
-                    hr = pSampleGrabber->SetBufferSamples(TRUE);
-                if (SUCCEEDED(hr) && pPlatformData->pMediaControl)
-                    hr = pPlatformData->pMediaControl->Run();
-                break;
-            case VIDEO_PAUSE:
-                if (SUCCEEDED(hr) && pPlatformData->pVideoWindow)
-                    hr = pPlatformData->pVideoWindow->put_Visible(OATRUE);
-                if (SUCCEEDED(hr) && pSampleGrabber)
-                    hr = pSampleGrabber->SetBufferSamples(TRUE);
-                if (SUCCEEDED(hr) && pPlatformData->pMediaControl)
-                    hr = pPlatformData->pMediaControl->Pause();
-                break;
-
-            case VIDEO_STOP:
-                if (SUCCEEDED(hr) && pSampleGrabber)
-                    hr = pSampleGrabber->SetBufferSamples(FALSE);
-                if (SUCCEEDED(hr) && pPlatformData->pMediaControl)
-                    hr = pPlatformData->pMediaControl->Stop();
-                //if (SUCCEEDED(hr) && pPlatformData->pVideoWindow)
-                //    hr = pPlatformData->pVideoWindow->put_Visible(OAFALSE);
-                break;                
-            }
+        if (ensemble[index].command) {
+            return ensemble[index].command(clientData, interp, objc, objv);
         }
-        if (FAILED(hr)) {
-            Tcl_SetObjResult(interp, Win32Error("video command failed", hr));
-            r = TCL_ERROR;
-        }
-        break;
+        ensemble = ensemble[index].ensemble;
+        ++optPtr;
     }
+    Tcl_WrongNumArgs(interp, optPtr, objv, "option ?arg arg...?");
+    return TCL_ERROR;
+}
 
-    case VIDEO_SEEK:
-    {
-        if (objc != 3) {
-            Tcl_WrongNumArgs(interp, 2, objv, "position");
-            r = TCL_ERROR;
+int 
+VideopWidgetInvalidCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[])
+{
+    ATLASSERT(FALSE && "We should never get here");
+    Tcl_SetResult(interp, "invalid command: you should never see this", TCL_STATIC);
+    return TCL_ERROR;
+}
+
+int 
+VideopWidgetPropPageCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[])
+{
+    Video *videoPtr = (Video *)clientData;
+    VideoPlatformData *pPlatformData = (VideoPlatformData *)videoPtr->platformData;
+    IGraphBuilder *pFilterGraph = NULL;
+    int r = TCL_OK;
+
+    if (objc != 3) {
+        Tcl_WrongNumArgs(interp, 2, objv, "\"filter\" or \"pin\"");
+        r = TCL_ERROR;
+    } else {
+        char * page = Tcl_GetString(objv[2]);
+        pFilterGraph = pPlatformData->pFilterGraph;
+        if (strncmp("filter", page, 6) == 0) {
+            ShowCaptureFilterProperties(pFilterGraph, Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)));
+        } else if (strncmp("pin", page, 3) == 0) {
+            ShowCapturePinProperties(pFilterGraph, Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)));
         } else {
-            pFilterGraph = pPlatformData->pFilterGraph;
-            if (! pFilterGraph) {
-                Tcl_SetObjResult(interp, Tcl_NewStringObj("error: no video source initialized", -1));
-                return TCL_ERROR;
-            }
+            Tcl_WrongNumArgs(interp, 2, objv, "\"filter\" or \"pin\"");
+            r = TCL_ERROR;
+        }
+    }
+    return r;
+}
 
-            if (!pPlatformData->pMediaSeeking) {
-                Tcl_SetObjResult(interp, Tcl_NewStringObj("seeking not supported on this source", -1));
+int 
+VideopWidgetDevicesCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[])
+{
+    int r = TCL_OK;
+
+    if (objc < 2 || objc > 3) {
+        Tcl_WrongNumArgs(interp, 2, objv, "?video | audio?");
+        r = TCL_ERROR;
+    } else {
+        CLSID clsid = CLSID_VideoInputDeviceCategory;
+        if (objc == 3) {
+            const char *type = Tcl_GetString(objv[2]);
+            if (strcmp("audio", type) == 0)
+                clsid = CLSID_AudioInputDeviceCategory;
+            else if (strcmp("video", type) != 0) {
+                Tcl_WrongNumArgs(interp, 2, objv, "?video | audio?");
                 r = TCL_ERROR;
-            } else {
-                REFERENCE_TIME t = 0;
-                r = Tcl_GetWideIntFromObj(interp, objv[2], &t);
-                if (r == TCL_OK) {
-                    t *= 10000; // convert from ms to 100ns
-                    pPlatformData->pMediaSeeking->SetPositions(&t, AM_SEEKING_AbsolutePositioning, NULL, AM_SEEKING_NoPositioning);
-                }
             }
         }
-        break;
-    }
-
-    case VIDEO_TELL:
-    {
-        if (objc != 2) {
-            Tcl_WrongNumArgs(interp, 2, objv, "");
-            r = TCL_ERROR;
-        } else {
-            pFilterGraph = pPlatformData->pFilterGraph;
-            if (! pFilterGraph) {
-                Tcl_SetObjResult(interp, Tcl_NewStringObj("error: no video source initialized", -1));
-                return TCL_ERROR;
-            }
-
-            if (!pPlatformData->pMediaSeeking) {
-                Tcl_SetObjResult(interp, Tcl_NewStringObj("seeking not supported for this type of source", -1));
-                r = TCL_ERROR;
-            } else {
-                REFERENCE_TIME tDuration, tCurrent, tStop;
-                pPlatformData->pMediaSeeking->SetTimeFormat(&TIME_FORMAT_MEDIA_TIME);
-                pPlatformData->pMediaSeeking->GetDuration(&tDuration);
-                pPlatformData->pMediaSeeking->GetPositions(&tCurrent, &tStop);
-                tDuration /= 10000; tStop /= 10000; tCurrent /= 10000; // convert units from 100ns to ms.
-                Tcl_Obj *resObj = Tcl_NewListObj(0, NULL);
-                r = Tcl_ListObjAppendElement(interp, resObj, Tcl_NewWideIntObj(tCurrent));
-                if (r == TCL_OK)
-                    r = Tcl_ListObjAppendElement(interp, resObj, Tcl_NewWideIntObj(tStop));
-                if (r == TCL_OK)
-                    r = Tcl_ListObjAppendElement(interp, resObj, Tcl_NewWideIntObj(tDuration));
-                Tcl_SetObjResult(interp, resObj);
-            }
+        if (r == TCL_OK) {
+            r = GetDeviceList(interp, clsid);
         }
-        break;
+    }
+    return r;
+}
+
+int 
+VideopWidgetControlCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[])
+{
+    Video *videoPtr = (Video *)clientData;
+    VideoPlatformData *pPlatformData = (VideoPlatformData *)videoPtr->platformData;
+    IGraphBuilder *pFilterGraph = NULL;
+    int r = TCL_OK, index = 0;
+
+    static const char *options[] = { "start", "stop", "pause", NULL };
+    enum {Video_Start, Video_Stop, Video_Pause};
+
+    if (Tcl_GetIndexFromObj(interp, objv[1], options, "command", 0, &index) != TCL_OK) {
+        return TCL_ERROR;
     }
 
-    case VIDEO_PICTURE: 
-    {
-        if (objc < 2 || objc > 3) {
-            Tcl_WrongNumArgs(interp, 2, objv, "?imagename?");
-            r = TCL_ERROR;
-        } else {
-            if (! pPlatformData->pFilterGraph) {
-                Tcl_SetObjResult(interp, Tcl_NewStringObj("error: no video source initialized", -1));
-                return TCL_ERROR;
-            }
-            const char *imageName = NULL;
-            if (objc == 3)
-                imageName = Tcl_GetString(objv[2]);
-            r = GrabSample(videoPtr, imageName);
+    pFilterGraph = pPlatformData->pFilterGraph;
+    if (! pFilterGraph) {
+        Tcl_SetObjResult(interp, Tcl_NewStringObj("error: no video source initialized", -1));
+        return TCL_ERROR;
+    }
+
+    CComPtr<IBaseFilter> pGrabberFilter;
+    CComPtr<ISampleGrabber> pSampleGrabber;
+    HRESULT hr = S_OK;
+    if (SUCCEEDED( pFilterGraph->FindFilterByName(SAMPLE_GRABBER_NAME, &pGrabberFilter) ))
+        hr = pGrabberFilter.QueryInterface(&pSampleGrabber);
+
+    if (SUCCEEDED(hr)) {
+        switch (index) {
+        case Video_Start:
+            if (SUCCEEDED(hr) && pPlatformData->pVideoWindow)
+                hr = pPlatformData->pVideoWindow->put_Visible(OATRUE);
+            if (SUCCEEDED(hr) && pSampleGrabber)
+                hr = pSampleGrabber->SetBufferSamples(TRUE);
+            if (SUCCEEDED(hr) && pPlatformData->pMediaControl)
+                hr = pPlatformData->pMediaControl->Run();
+            break;
+        case Video_Pause:
+            if (SUCCEEDED(hr) && pPlatformData->pVideoWindow)
+                hr = pPlatformData->pVideoWindow->put_Visible(OATRUE);
+            if (SUCCEEDED(hr) && pSampleGrabber)
+                hr = pSampleGrabber->SetBufferSamples(TRUE);
+            if (SUCCEEDED(hr) && pPlatformData->pMediaControl)
+                hr = pPlatformData->pMediaControl->Pause();
+            break;
+
+        case Video_Stop:
+            if (SUCCEEDED(hr) && pSampleGrabber)
+                hr = pSampleGrabber->SetBufferSamples(FALSE);
+            if (SUCCEEDED(hr) && pPlatformData->pMediaControl)
+                hr = pPlatformData->pMediaControl->Stop();
+            //if (SUCCEEDED(hr) && pPlatformData->pVideoWindow)
+            //    hr = pPlatformData->pVideoWindow->put_Visible(OAFALSE);
+            break;                
         }
-        break;
     }
-
-    default:
-        Tcl_WrongNumArgs(interp, 1, objv, "option ?arg arg ...?");
+    if (FAILED(hr)) {
+        Tcl_SetObjResult(interp, Win32Error("video command failed", hr));
         r = TCL_ERROR;
     }
 
     return r;
+}
+
+int
+VideopWidgetTellCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[])
+{
+    Video *videoPtr = (Video *)clientData;
+    VideoPlatformData *pPlatformData = (VideoPlatformData *)videoPtr->platformData;
+    int r = TCL_OK;
+
+    if (objc != 2) {
+        Tcl_WrongNumArgs(interp, 2, objv, "");
+        r = TCL_ERROR;
+    } else {
+        if (pPlatformData->pFilterGraph == NULL) {
+            Tcl_SetObjResult(interp, Tcl_NewStringObj("error: no video source initialized", -1));
+            return TCL_ERROR;
+        }
+
+        if (pPlatformData->pMediaSeeking == NULL) {
+            Tcl_SetObjResult(interp, Tcl_NewStringObj("seeking not supported for this type of source", -1));
+            r = TCL_ERROR;
+        } else {
+            REFERENCE_TIME tDuration, tCurrent, tStop;
+            pPlatformData->pMediaSeeking->SetTimeFormat(&TIME_FORMAT_MEDIA_TIME);
+            pPlatformData->pMediaSeeking->GetDuration(&tDuration);
+            pPlatformData->pMediaSeeking->GetPositions(&tCurrent, &tStop);
+            tDuration /= 10000; tStop /= 10000; tCurrent /= 10000; // convert units from 100ns to ms.
+            Tcl_Obj *resObj = Tcl_NewListObj(0, NULL);
+            r = Tcl_ListObjAppendElement(interp, resObj, Tcl_NewWideIntObj(tCurrent));
+            if (r == TCL_OK)
+                r = Tcl_ListObjAppendElement(interp, resObj, Tcl_NewWideIntObj(tStop));
+            if (r == TCL_OK)
+                r = Tcl_ListObjAppendElement(interp, resObj, Tcl_NewWideIntObj(tDuration));
+            Tcl_SetObjResult(interp, resObj);
+        }
+    }
+    return r;
+}
+
+int
+VideopWidgetSeekCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[])
+{
+    Video *videoPtr = (Video *)clientData;
+    VideoPlatformData *pPlatformData = (VideoPlatformData *)videoPtr->platformData;
+    int r = TCL_OK;
+
+    if (objc != 3) {
+        Tcl_WrongNumArgs(interp, 2, objv, "position");
+        r = TCL_ERROR;
+    } else {
+        if (pPlatformData->pFilterGraph == NULL) {
+            Tcl_SetObjResult(interp, Tcl_NewStringObj("error: no video source initialized", -1));
+            return TCL_ERROR;
+        }
+        if (pPlatformData->pMediaSeeking == NULL) {
+            Tcl_SetObjResult(interp, Tcl_NewStringObj("seeking not supported on this source", -1));
+            r = TCL_ERROR;
+        } else {
+            REFERENCE_TIME t = 0;
+            r = Tcl_GetWideIntFromObj(interp, objv[2], &t);
+            if (r == TCL_OK) {
+                t *= 10000; // convert from ms to 100ns
+                pPlatformData->pMediaSeeking->SetPositions(&t, AM_SEEKING_AbsolutePositioning, NULL, AM_SEEKING_NoPositioning);
+            }
+        }
+    }
+    return r;
+}
+
+int 
+VideopWidgetPictureCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[])
+{
+    Video *videoPtr = (Video *)clientData;
+    VideoPlatformData *pPlatformData = (VideoPlatformData *)videoPtr->platformData;
+    int r = TCL_OK;
+
+    if (objc < 2 || objc > 3) {
+        Tcl_WrongNumArgs(interp, 2, objv, "?imagename?");
+        r = TCL_ERROR;
+    } else {
+        if (pPlatformData->pFilterGraph == NULL) {
+            Tcl_SetObjResult(interp, Tcl_NewStringObj("error: no video source initialized", -1));
+            return TCL_ERROR;
+        }
+        const char *imageName = NULL;
+        if (objc == 3) {
+            imageName = Tcl_GetString(objv[2]);
+        }
+        r = GrabSample(videoPtr, imageName);
+    }
+    return r;
+}
+
+int 
+VideopWidgetOverlayCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[])
+{
+    Video *videoPtr = (Video *)clientData;
+    VideoPlatformData *pPlatformData = (VideoPlatformData *)videoPtr->platformData;
+    int r = TCL_OK;
+
+    if (objc != 3) {
+        Tcl_WrongNumArgs(interp, 2, objv, "imagename");
+        r = TCL_ERROR;
+    } else {
+        if (pPlatformData->pFilterGraph == NULL) {
+            Tcl_SetObjResult(interp, Tcl_NewStringObj("error: no video source initialized", -1));
+            return TCL_ERROR;
+        }
+        const char *imageName = NULL;
+        if (objc == 3) {
+            imageName = Tcl_GetString(objv[2]);
+        }
+
+        HBITMAP hbm = NULL;
+        r = PhotoToHBITMAP(interp, imageName, &hbm);
+        if (hbm) {
+            if (pPlatformData->hbmOverlay)
+                DeleteObject(pPlatformData->hbmOverlay);
+            pPlatformData->hbmOverlay = hbm;
+        }
+        if (r == TCL_OK) {
+            HRESULT hr = AddOverlay(videoPtr);
+            if (FAILED(hr))
+                Tcl_SetObjResult(interp, Win32Error("failed to set overlay", hr));
+            r = SUCCEEDED(hr) ? TCL_OK : TCL_ERROR;
+        }
+    }
+    return r;
+}
+
+    //HBITMAP hbmTest = (HBITMAP)LoadImage(0, _T("logo.bmp"), IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE);
+    //if (hbmTest) {
+    //    WriteBitmapFile(hdc, hbmTest, _T("C:\\temp\\ztkvideo_test.bmp"));
+    //    DeleteObject(hbmTest);
+    //}
+    //WriteBitmapFile(hdc, platformData->hbmOverlay, _T("C:\\temp\\ztkvideo_overlay.bmp"));
+
+
+int
+PhotoToHBITMAP(Tcl_Interp *interp, const char *imageName, HBITMAP *phBitmap)
+{
+    BITMAP bm;
+    int x, y;
+    unsigned char *srcPtr, *dstPtr, *bits;
+    Tk_PhotoImageBlock block;
+
+    Tk_PhotoHandle img = Tk_FindPhoto(interp, imageName);
+    Tk_PhotoGetImage(img, &block);
+
+    bits = (unsigned char *)ckalloc(block.width * block.height * sizeof(unsigned char));
+    srcPtr = block.pixelPtr;
+    for (y = block.height - 1; y >= 0; y--) 
+    {
+	    dstPtr = bits + (y * block.width);
+	    for (x = 0; x < block.width; x++) 
+        {
+	        *dstPtr++ = *(srcPtr + block.offset[2]); /* B */
+	        *dstPtr++ = *(srcPtr + block.offset[1]); /* G */
+	        *dstPtr++ = *(srcPtr + block.offset[0]); /* R */
+	        *dstPtr++ = *(srcPtr + block.offset[3]); /* A */
+	        srcPtr += block.pixelSize;
+	    }
+    }
+    bm.bmType = 0;
+    bm.bmWidth = block.width;
+    bm.bmHeight = block.height;
+    bm.bmWidthBytes = block.width * block.pixelSize;
+    bm.bmPlanes = 1;
+    bm.bmBitsPixel = 32;
+    bm.bmBits = bits;
+    
+    *phBitmap = CreateBitmapIndirect(&bm);
+    if (*phBitmap)
+        return TCL_OK;
+    return TCL_ERROR;
 }
 
 HRESULT
@@ -542,7 +731,7 @@ GetDeviceList(Tcl_Interp *interp, CLSID clsidCategory)
 
 // -----------------------------------------------------------------
 
-static HRESULT
+HRESULT
 MediaType(LPCWSTR sPath, LPCGUID *ppMediaType, LPCGUID *ppMediaSubType)
 {
     struct MediaTable { LPCWSTR wsz; LPCGUID type; LPCGUID subtype; };
@@ -566,7 +755,7 @@ MediaType(LPCWSTR sPath, LPCGUID *ppMediaType, LPCGUID *ppMediaSubType)
     return E_INVALIDARG;
 }
 
-static HRESULT 
+HRESULT 
 ConstructCaptureGraph(int DeviceIndex, int AudioIndex, LPCWSTR sSourcePath, LPCWSTR sOutputPath, IGraphBuilder **ppGraph)
 {
     CComPtr<IGraphBuilder> pGraph;
@@ -657,7 +846,8 @@ ConstructCaptureGraph(int DeviceIndex, int AudioIndex, LPCWSTR sSourcePath, LPCW
     CComPtr<IBaseFilter> pRenderFilter;
     if (SUCCEEDED(hr))
     {
-        hr = pRenderFilter.CoCreateInstance(CLSID_VideoMixingRenderer9);
+        //hr = pRenderFilter.CoCreateInstance(CLSID_VideoMixingRenderer9);
+        hr = pRenderFilter.CoCreateInstance(CLSID_VideoRendererDefault);
         if (FAILED(hr))
             hr = pRenderFilter.CoCreateInstance(CLSID_VideoRenderer);
         if (SUCCEEDED(hr))
@@ -670,6 +860,11 @@ ConstructCaptureGraph(int DeviceIndex, int AudioIndex, LPCWSTR sSourcePath, LPCW
     // Add in a preview
     if (SUCCEEDED(hr))
     {
+        CComPtr<IVMRFilterConfig> pVMRFilterConfig;
+        HRESULT hrx = pRenderFilter->QueryInterface(&pVMRFilterConfig);
+        if (SUCCEEDED(hrx))
+            hrx = pVMRFilterConfig->SetNumberOfStreams(2);
+
         if (bFileSource) 
         {
             LPCGUID pType = NULL, pSubType = NULL;
@@ -677,7 +872,22 @@ ConstructCaptureGraph(int DeviceIndex, int AudioIndex, LPCWSTR sSourcePath, LPCW
             hr = pBuilder->RenderStream(NULL, pType, pCaptureFilter, pGrabberFilter, pRenderFilter);
         }
         else
+        {
             hr = pBuilder->RenderStream(&PIN_CATEGORY_PREVIEW, &MEDIATYPE_Video, pCaptureFilter, pGrabberFilter, pRenderFilter);
+            if (hr == VFW_E_CANNOT_CONNECT && pVMRFilterConfig != NULL)
+            {
+                // It's possible that the graph might fail to render on the VMR filter but will be ok when the rederer is non-mixing.
+                // (this is the case for the Infinity camera). So lets try without enabling mixing in this case.
+                hr = pGraph->RemoveFilter(pRenderFilter);
+                pRenderFilter.Release();
+                if (SUCCEEDED(hr))
+                    hr = pRenderFilter.CoCreateInstance(CLSID_VideoRendererDefault);
+                if (SUCCEEDED(hr))
+                    hr = pGraph->AddFilter(pRenderFilter, RENDERER_FILTER_NAME);
+                if (SUCCEEDED(hr))
+                    hr = pBuilder->RenderStream(NULL, NULL, pGrabberFilter, NULL, pRenderFilter);
+            }
+        }
     }
 
     // Now connect up the video source to the mux for saving. (The mux is already connected to the writer).
@@ -705,6 +915,46 @@ ConstructCaptureGraph(int DeviceIndex, int AudioIndex, LPCWSTR sSourcePath, LPCW
             pBuilder->RenderStream(NULL, &MEDIATYPE_Audio, pCaptureFilter, NULL, NULL);
         }
     }
+
+#ifdef USE_STILL_PIN
+    // If the capture device has a still pin then hook it up.
+    {
+        CComPtr<IPin> pStillPin;
+        HRESULT hr = FindPinByCategory(pCaptureFilter, PIN_CATEGORY_STILL, &pStillPin);
+        if (SUCCEEDED(hr) && pStillPin)
+        {
+            CComPtr<IBaseFilter> pStillGrabber;
+            CComPtr<IBaseFilter> pStillRenderer;
+            hr = pStillGrabber.CoCreateInstance(CLSID_SampleGrabber);
+            if (SUCCEEDED(hr))
+                hr = pStillRenderer.CoCreateInstance(CLSID_NullRenderer);
+            if (SUCCEEDED(hr))
+                hr = pGraph->AddFilter(pStillGrabber, STILL_GRABBER_NAME);
+            if (SUCCEEDED(hr))
+                hr = pGraph->AddFilter(pStillRenderer, STILL_RENDERER_NAME);
+            if (SUCCEEDED(hr))
+            {
+                CComQIPtr<ISampleGrabber> pSampleGrabber(pStillGrabber);
+                if (pSampleGrabber)
+                {
+                    hr = pSampleGrabber->SetOneShot(FALSE);
+                    hr = pSampleGrabber->SetBufferSamples(TRUE);
+
+                    AM_MEDIA_TYPE *pmt = NULL;
+                    hr = GetCaptureMediaFormat(pGraph, -1, &pmt);
+                    if (SUCCEEDED(hr))
+                    {
+                        hr = pSampleGrabber->SetMediaType(pmt);
+                        if (SUCCEEDED(hr))
+                            hr = pBuilder->RenderStream(&PIN_CATEGORY_STILL, &MEDIATYPE_Video,
+                                        pCaptureFilter, pStillGrabber, pStillRenderer);
+                        FreeMediaType(pmt);
+                    }
+                }
+            }
+        }
+    }
+#endif /* USE_STILL_PIN */
 
     if (SUCCEEDED(hr))
         hr = pGraph.CopyTo(ppGraph);
@@ -745,6 +995,80 @@ CreateCompatibleSampleGrabber(IBaseFilter **ppFilter)
     }
     return hr;
 }
+
+void
+FreeMediaType(AM_MEDIA_TYPE *pmt)
+{
+    if (pmt)
+    {
+        if (pmt->cbFormat)
+            CoTaskMemFree(pmt->pbFormat);
+        CoTaskMemFree(pmt);
+    }
+}
+
+HRESULT
+GetCaptureMediaFormat(IGraphBuilder *pGraph, int index, AM_MEDIA_TYPE **ppmt)
+{
+    CComPtr<IBaseFilter> pGrabberFilter;
+    CComPtr<IAMStreamConfig> pConfig;
+
+    HRESULT hr = FindGraphInterface(pGraph, CAPTURE_FILTER_NAME, IID_IAMStreamConfig, (void**)&pConfig);
+    if (SUCCEEDED(hr))
+    {
+        int nCount = 0, nSize = 0;
+        hr = pConfig->GetNumberOfCapabilities(&nCount, &nSize);
+
+        // If we were passed an index then return that media type. Otherwise we search for
+        // the best (ie: biggest) one.
+        if (index != -1)
+        {
+            VIDEO_STREAM_CONFIG_CAPS caps;
+            hr = pConfig->GetStreamCaps(index, ppmt, (LPBYTE)&caps);
+        }
+        else
+        {
+            AM_MEDIA_TYPE *pMediaType = 0;
+            ULONG nVideoSize = 0;
+
+            for (int n = 0; SUCCEEDED(hr) && n < nCount; n++)
+            {
+                VIDEO_STREAM_CONFIG_CAPS caps;
+                AM_MEDIA_TYPE *pmt = 0;
+                ULONG nSize = 0;
+                hr = pConfig->GetStreamCaps(n, &pmt, (LPBYTE)&caps);
+                if (SUCCEEDED(hr))
+                {
+                    //ATLTRACE(_T("caps: %d cx: %d cy: %d\n"), n, caps.MaxOutputSize.cx, caps.MaxOutputSize.cy);
+                    if (pmt->formattype == FORMAT_VideoInfo && pmt->cbFormat > 0)
+                    {
+                        VIDEOINFOHEADER *pvih = (VIDEOINFOHEADER *)pmt->pbFormat;
+                        ATLTRACE(_T("pmt : %d cx: %d cy:%d bitcnt: %d\n"),
+                            n, pvih->bmiHeader.biWidth, pvih->bmiHeader.biHeight, pvih->bmiHeader.biBitCount);
+                        nSize = pvih->bmiHeader.biWidth * pvih->bmiHeader.biHeight;
+                    }
+                    if (nSize > nVideoSize)
+                    {
+                        ATLTRACE(_T("use index %d for return\n"), n);
+                        FreeMediaType(pMediaType);
+                        pMediaType = pmt;
+                        nVideoSize = nSize;
+                    }
+                    else 
+                    {
+                        FreeMediaType(pmt);
+                        if (nSize == nVideoSize && nSize != 0)
+                            break;
+                    }
+                }
+            }
+            *ppmt = pMediaType;
+        }
+    }
+
+    return hr;
+}
+
 
 /**
  * Connect the capture graph to a window. This window needs
@@ -836,8 +1160,8 @@ GetVideoSize(Video *videoPtr, long *pWidth, long *pHeight)
             if (mt.formattype == FORMAT_VideoInfo)
             {
                 VIDEOINFOHEADER *pvih = reinterpret_cast<VIDEOINFOHEADER *>(mt.pbFormat);
-                *pWidth = pvih->bmiHeader.biWidth;
-                *pHeight = pvih->bmiHeader.biHeight;                
+                *pWidth = abs(pvih->bmiHeader.biWidth);
+                *pHeight = abs(pvih->bmiHeader.biHeight);
             }
 
             // We have to clean up the media format properly.
@@ -869,7 +1193,37 @@ GrabSample(Video *videoPtr, LPCSTR imageName)
     Tcl_Obj *errObj = NULL;
     int r = TCL_OK;
 
+#ifdef USE_STILL_PIN
+    // If we have a still pin hooked up, trigger it now.
+    HRESULT hr = pPlatformData->pFilterGraph->FindFilterByName(STILL_GRABBER_NAME, &pGrabberFilter);
+    if (SUCCEEDED(hr))
+    {
+        CComPtr<IBaseFilter> pCaptureFilter;
+        hr = pPlatformData->pFilterGraph->FindFilterByName(CAPTURE_FILTER_NAME, &pCaptureFilter);
+        if (SUCCEEDED(hr))
+        {
+            CComPtr<IPin> pStillPin;
+            hr = FindPinByCategory(pCaptureFilter, PIN_CATEGORY_STILL, &pStillPin);
+            if (SUCCEEDED(hr) && pStillPin)
+            {
+                CComPtr<IAMVideoControl> pAMVideoControl;
+                hr = pCaptureFilter->QueryInterface(IID_IAMVideoControl, reinterpret_cast<void **>(&pAMVideoControl));
+                if (SUCCEEDED(hr))
+                    hr = pAMVideoControl->SetMode(pStillPin, VideoControlFlag_Trigger);
+            }
+        }
+    }
+    else
+    {
+        hr = pPlatformData->pFilterGraph->FindFilterByName(SAMPLE_GRABBER_NAME, &pGrabberFilter);
+    }
+
+#else  /* USE_STILL_PIN */
+
     HRESULT hr = pPlatformData->pFilterGraph->FindFilterByName(SAMPLE_GRABBER_NAME, &pGrabberFilter);
+
+#endif /* USE_STILL_PIN */
+
     if (SUCCEEDED(hr))
         hr = pGrabberFilter.QueryInterface(&pSampleGrabber);
 
@@ -896,7 +1250,7 @@ GrabSample(Video *videoPtr, LPCSTR imageName)
     LPBYTE pData = NULL;
     if (SUCCEEDED(hr))
         hr = pSampleGrabber->GetCurrentBuffer(&cbData, NULL);
-    if (hr == E_INVALIDARG)
+    if (hr == E_INVALIDARG || hr == VFW_E_WRONG_STATE)
         errObj = Tcl_NewStringObj("image capture failed: no samples are being buffered", -1);
     if (SUCCEEDED(hr))
     {
@@ -1116,6 +1470,206 @@ ComputeAnchor(Tk_Anchor anchor, Tk_Window tkwin,
 		    - innerHeight;
 	    break;
     }
+}
+
+HRESULT
+AddOverlay(Video *videoPtr)
+{
+    VideoPlatformData *platformData = (VideoPlatformData *)videoPtr->platformData;
+    LONG cx, cy;
+    HRESULT hr;
+
+    HWND hwnd = Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)); 
+    hr = GetVideoSize(videoPtr, &cx, &cy);
+    if (SUCCEEDED(hr))
+    {
+        HDC hdcBitmap;
+        HDC hdc = GetDC(hwnd);
+        if (hdc == NULL)
+            hr = E_FAIL;
+        
+        if (SUCCEEDED(hr))
+        {
+            hdcBitmap = CreateCompatibleDC(hdc);
+            if (hdcBitmap == NULL)
+                hr = E_FAIL;
+            ReleaseDC(hwnd, hdc);
+        }
+    
+        BITMAP bitmap = {0};
+        if (SUCCEEDED(hr))
+        {
+            if (GetObject(platformData->hbmOverlay, sizeof(BITMAP), &bitmap) == NULL)
+            //if (GetObject(hbmTest, sizeof(BITMAP), &bitmap) == NULL)
+            {
+                DeleteDC(hdcBitmap);
+                hr = E_FAIL;
+            }
+        }
+    
+        HBITMAP hbmOld;
+        if (SUCCEEDED(hr))
+        {
+            hbmOld = (HBITMAP)SelectObject(hdcBitmap, platformData->hbmOverlay);
+            //hbmOld = (HBITMAP)SelectObject(hdcBitmap, hbmTest);
+            if (hbmOld == NULL)
+            {
+                DeleteDC(hdcBitmap);
+                hr = E_FAIL;
+            }
+        }
+    
+        VMRALPHABITMAP bmpInfo;
+        if (SUCCEEDED(hr))
+        {
+            ZeroMemory(&bmpInfo, sizeof(bmpInfo) );
+            bmpInfo.dwFlags = VMRBITMAP_HDC;
+            bmpInfo.hdc = hdcBitmap;
+    
+            // Show the entire bitmap in the top-left corner of the video image.
+            SetRect(&bmpInfo.rSrc, 0, 0, bitmap.bmWidth, bitmap.bmHeight);
+            bmpInfo.rDest.left = 0;
+            bmpInfo.rDest.top = 0;
+            bmpInfo.rDest.right = (float)bitmap.bmWidth / (float)cx;
+            bmpInfo.rDest.bottom = (float)bitmap.bmHeight / (float)cy;
+    
+            // Set the transparency value (1.0 is opaque, 0.0 is transparent).
+            bmpInfo.fAlpha = 1.0;
+
+            CComPtr<IBaseFilter> pFilter;
+            CComPtr<IVMRMixerBitmap> pMixer;
+            hr = platformData->pFilterGraph->FindFilterByName(RENDERER_FILTER_NAME, &pFilter);
+            if (SUCCEEDED(hr))
+                hr = pFilter->QueryInterface(&pMixer);
+            if (SUCCEEDED(hr))
+                hr = pMixer->SetAlphaBitmap(&bmpInfo);
+
+            DeleteObject(SelectObject(hdcBitmap, hbmOld));
+            DeleteDC(hdcBitmap);
+        }
+    }
+    return hr;
+}
+
+// -------------------------------------------------------------------------
+
+static HRESULT
+CreateBitmapInfoStruct(HBITMAP hBmp, PBITMAPINFO *ppbmi)
+{ 
+    PBITMAPINFO pbmi = NULL;
+    BITMAP bmp; 
+    WORD cClrBits; 
+    HRESULT hr = E_POINTER;
+
+    if (ppbmi)
+    {
+        hr = S_OK;
+
+        // Retrieve the bitmap's color format, width, and height. 
+        if (GetObject(hBmp, sizeof(BITMAP), (LPSTR)&bmp) == NULL) 
+            hr = E_INVALIDARG;
+
+        // Convert the color format to a count of bits. 
+        if (SUCCEEDED(hr))
+        {
+            cClrBits = (WORD)(bmp.bmPlanes * bmp.bmBitsPixel); 
+            if (cClrBits == 1) 
+                cClrBits = 1; 
+            else if (cClrBits <= 4) 
+                cClrBits = 4; 
+            else if (cClrBits <= 8) 
+                cClrBits = 8; 
+            else if (cClrBits <= 16) 
+                cClrBits = 16; 
+            else if (cClrBits <= 24) 
+                cClrBits = 24; 
+            else cClrBits = 32; 
+
+            // Allocate memory for the BITMAPINFO structure. (This structure 
+            // contains a BITMAPINFOHEADER structure and an array of RGBQUAD 
+            // data structures.)
+            if (cClrBits != 24)
+            {
+                pbmi = (PBITMAPINFO) LocalAlloc(LPTR, sizeof(BITMAPINFOHEADER) + sizeof(RGBQUAD) * (1<< cClrBits)); 
+            }
+            else
+            {
+                // There is no RGBQUAD array for the 24-bit-per-pixel format. 
+                pbmi = (PBITMAPINFO) LocalAlloc(LPTR, sizeof(BITMAPINFOHEADER)); 
+            }
+
+            // Initialize the fields in the BITMAPINFO structure. 
+            pbmi->bmiHeader.biSize = sizeof(BITMAPINFOHEADER); 
+            pbmi->bmiHeader.biWidth = bmp.bmWidth; 
+            pbmi->bmiHeader.biHeight = bmp.bmHeight; 
+            pbmi->bmiHeader.biPlanes = bmp.bmPlanes; 
+            pbmi->bmiHeader.biBitCount = bmp.bmBitsPixel; 
+            if (cClrBits < 24) 
+                pbmi->bmiHeader.biClrUsed = (1<<cClrBits);
+
+            // If the bitmap is not compressed, set the BI_RGB flag. 
+            pbmi->bmiHeader.biCompression = BI_RGB; 
+
+            // Compute the number of bytes in the array of color 
+            // indices and store the result in biSizeImage. 
+            // For Windows NT/2000, the width must be DWORD aligned unless 
+            // the bitmap is RLE compressed. This example shows this. 
+            // For Windows 95/98, the width must be WORD aligned unless the 
+            // bitmap is RLE compressed.
+            pbmi->bmiHeader.biSizeImage = ((pbmi->bmiHeader.biWidth * cClrBits +31) & ~31) /8 * pbmi->bmiHeader.biHeight; 
+            // Set biClrImportant to 0, indicating that all of the 
+            // device colors are important. 
+            pbmi->bmiHeader.biClrImportant = 0; 
+
+            *ppbmi = pbmi;
+        }
+    }
+    return hr;
+} 
+
+HRESULT
+WriteBitmapFile(HDC hdc, HBITMAP hbmp, LPCTSTR szFilename) 
+{ 
+    BITMAPFILEHEADER hdr = {0};
+    PBITMAPINFO pbi = NULL;
+    PBITMAPINFOHEADER pbih = NULL;
+    DWORD cbWrote = 0;
+    LPBYTE bits = NULL;
+
+    HRESULT hr = CreateBitmapInfoStruct(hbmp, &pbi);
+    if (SUCCEEDED(hr))
+    {
+        pbih = (PBITMAPINFOHEADER)pbi;
+        bits = (LPBYTE) GlobalAlloc(GMEM_FIXED, pbih->biSizeImage);
+        if (bits == NULL)
+            hr = E_OUTOFMEMORY;
+        if (SUCCEEDED(hr))
+        {
+            if (GetDIBits(hdc, hbmp, 0, (WORD)pbih->biHeight, bits, pbi, DIB_RGB_COLORS) == 0)
+                hr = E_INVALIDARG;
+
+            hdr.bfType = 0x4d42; // 0x42 = "B" 0x4d = "M"
+            hdr.bfReserved1 = 0;
+            hdr.bfReserved2 = 0;
+            // Compute the size of the entire file. 
+            hdr.bfSize = (DWORD) (sizeof(BITMAPFILEHEADER) + pbih->biSize + pbih->biClrUsed * sizeof(RGBQUAD) + pbih->biSizeImage);
+            // Compute the offset to the array of color indices. 
+            hdr.bfOffBits = (DWORD) sizeof(BITMAPFILEHEADER) + pbih->biSize + pbih->biClrUsed * sizeof (RGBQUAD); 
+
+            if (SUCCEEDED(hr))
+            {
+                HANDLE hFile = CreateFile(szFilename, GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                WriteFile(hFile, (LPVOID)&hdr, sizeof(BITMAPFILEHEADER), &cbWrote, NULL); 
+                WriteFile(hFile, (LPVOID)pbih, sizeof(BITMAPINFOHEADER) + pbih->biClrUsed * sizeof(RGBQUAD), &cbWrote, NULL);
+                WriteFile(hFile, (LPBYTE)bits, pbih->biSize, &cbWrote, NULL);
+                CloseHandle(hFile);
+            }
+
+            GlobalFree(bits);
+        }
+        LocalFree(pbi);    
+    }
+    return hr;
 }
 
 // -------------------------------------------------------------------------

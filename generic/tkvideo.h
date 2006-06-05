@@ -63,7 +63,7 @@ typedef struct {
 enum {
     VIDEO_CGET, VIDEO_CONFIGURE, VIDEO_XVIEW, VIDEO_YVIEW, VIDEO_PROPERTYPAGE,
     VIDEO_STOP, VIDEO_START, VIDEO_PAUSE, VIDEO_DEVICES, VIDEO_PICTURE,
-    VIDEO_SEEK, VIDEO_TELL
+    VIDEO_SEEK, VIDEO_TELL, VIDEO_AUDIO,
 };
 
 int  VideopInit(Tcl_Interp *interp);
@@ -71,7 +71,7 @@ int  VideopCreateWidget(Video *videoPtr);
 void VideopDestroy(Video *videoPtr);
 void VideopCleanup(char *memPtr);
 int  VideopWidgetObjCmd(ClientData clientData, Tcl_Interp *interp,
-                        int index, int objc, Tcl_Obj *CONST objv[]);
+                        int objc, Tcl_Obj *CONST objv[]);
 void VideopCalculateGeometry(Video *videoPtr);
 
 int  VideopInitializeSource(Video *videoPtr);
