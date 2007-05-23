@@ -729,9 +729,10 @@ VideoUpdateHScrollbar(Video* videoPtr)
  */
 
 void 
-SendVirtualEvent(Tk_Window tgtWin, const char *eventName)
+SendVirtualEvent(Tk_Window tgtWin, const char *eventName, unsigned int state)
 {
     XEvent event;
+    XVirtualEvent *eventPtr = (XVirtualEvent *)&event;
 
     memset(&event, 0, sizeof(event));
     event.xany.type = VirtualEvent;
@@ -739,7 +740,11 @@ SendVirtualEvent(Tk_Window tgtWin, const char *eventName)
     event.xany.send_event = False;
     event.xany.window = Tk_WindowId(tgtWin);
     event.xany.display = Tk_Display(tgtWin);
-    ((XVirtualEvent *) &event)->name = Tk_GetUid(eventName);
+    eventPtr->name = Tk_GetUid(eventName);
+    eventPtr->state = state;
+    /* eventPtr->x = pointer X */
+    /* eventPtr->y = pointer Y */
+    Tk_GetRootCoords(tgtWin, &eventPtr->x_root, &eventPtr->y_root);
 
     Tk_QueueWindowEvent(&event, TCL_QUEUE_TAIL);
 }

@@ -852,6 +852,13 @@ ConstructCaptureGraph(int DeviceIndex, int AudioIndex, LPCWSTR sSourcePath, LPCW
             hr = pRenderFilter.CoCreateInstance(CLSID_VideoRenderer);
         if (SUCCEEDED(hr))
             hr = pGraph->AddFilter(pRenderFilter, RENDERER_FILTER_NAME);
+        if (SUCCEEDED(hr))
+        {
+            CComPtr<IVMRFilterConfig> pVMRFilterConfig;
+            HRESULT hrx = pRenderFilter->QueryInterface(&pVMRFilterConfig);
+            if (SUCCEEDED(hrx))
+                hrx = pVMRFilterConfig->SetNumberOfStreams(2);
+        }
     }
 
     // Could add in a compressor here.
@@ -1342,6 +1349,8 @@ VideopWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     Video *videoPtr = (Video *)GetProp(hwnd, TEXT("Tkvideo"));
     VideoPlatformData *platformPtr = (VideoPlatformData *)videoPtr->platformData;
+    Tcl_Obj *userObj = NULL;
+
     if (uMsg == WM_GRAPHNOTIFY && platformPtr->pMediaEvent != NULL)
     {
         long evCode = 0, lParam1 = 0, lParam2 = 0;
@@ -1350,13 +1359,13 @@ VideopWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             switch (evCode)
             {
             case EC_PAUSED:
-                SendVirtualEvent(videoPtr->tkwin, "VideoPaused");
+                SendVirtualEvent(videoPtr->tkwin, "VideoPaused", 0);
                 break;
             case EC_COMPLETE:
-                SendVirtualEvent(videoPtr->tkwin, "VideoComplete");
+                SendVirtualEvent(videoPtr->tkwin, "VideoComplete", 0);
                 break;
             case EC_USERABORT:
-                SendVirtualEvent(videoPtr->tkwin, "VideoUserAbort");
+                SendVirtualEvent(videoPtr->tkwin, "VideoUserAbort", 0);
                 break;
             case EC_VIDEO_SIZE_CHANGED:
                 {
@@ -1364,6 +1373,32 @@ VideopWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                     int height = HIWORD(lParam1);
                     SendConfigureEvent(videoPtr->tkwin, 0, 0, width, height);
                 }
+                break;
+            case EC_ERRORABORT:
+                if (lParam1 == VFW_E_CANNOT_CONNECT) {
+                    /* occurs when the window is moved onto a display with a 
+                     * different colour depth
+                     */
+                    /* ??? VideopInitializeSource(videoPtr); */
+                }
+                SendVirtualEvent(videoPtr->tkwin, "VideoErrorAbort", lParam1);
+                break;
+            case EC_REPAINT:
+                /* FIX ME: SendExposeEvent ?? */
+                SendVirtualEvent(videoPtr->tkwin, "VideoRepaint", 0);
+                break;
+            case EC_DEVICE_LOST:
+                SendVirtualEvent(videoPtr->tkwin, "VideoDeviceLost", 0);
+                break;
+            case EC_BUFFERING_DATA:
+            case EC_STEP_COMPLETE:
+            case EC_DVD_TITLE_CHANGE:
+            case EC_DVD_DOMAIN_CHANGE:
+            case EC_DVD_CURRENT_HMSF_TIME:
+            case EC_DVD_ERROR:
+            case EC_DVD_WARNING:
+            case EC_LENGTH_CHANGED:
+            default:
                 break;
             }
             platformPtr->pMediaEvent->FreeEventParams(evCode, lParam1, lParam2);

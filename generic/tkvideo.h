@@ -75,7 +75,7 @@ int  VideopWidgetObjCmd(ClientData clientData, Tcl_Interp *interp,
 void VideopCalculateGeometry(Video *videoPtr);
 
 int  VideopInitializeSource(Video *videoPtr);
-void SendVirtualEvent(Tk_Window targetwin, const char *eventName);
+void SendVirtualEvent(Tk_Window targetwin, const char *eventName, unsigned int state);
 void SendConfigureEvent(Tk_Window tgtWin, int x, int y, int height, int width);
 
 #ifdef __cplusplus

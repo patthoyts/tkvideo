@@ -1,3 +1,11 @@
+2006-06-05  Pat Thoyts  <patthoyts@users.sourceforge.net>
+
+	* win/winvideo.cpp: Support capture devices that fail on the VMR
+	in mixing mode. Partial support for bitmap overlays. Elided
+	support	for the still pin. Incremented version to 1.3.0
+	* generic/tkvideo.c: Rewrote commands using ensemble structure.
+	* demo/demo.tcl: Added slider text overlay using unpatched tile.
+
 2005-09-20  Pat Thoyts  <patthoyts@users.sourceforge.net>
 
 	* all: --- Release 1.2.1 ---

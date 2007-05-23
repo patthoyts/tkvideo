@@ -58,7 +58,7 @@ proc onSource {Application} {
 
 proc Exit {Application} {
     upvar #0 $Application app
-    after cancel $app(after)
+    catch {after cancel $app(after)}
     set mw $app(main)
     unset $Application
     destroy $mw
@@ -342,6 +342,9 @@ proc Main {mw {filename {}}} {
     bind $v <<VideoPaused>>   { puts stderr "VideoPaused" }
     bind $v <<VideoComplete>> [list onComplete $Application]
     bind $v <<VideoUserAbort>> { puts stderr "VideoUserAbort" }
+    bind $v <<VideoErrorAbort>> { puts stderr "VideoErrorAbort [format 0x%08x %s]" }
+    bind $v <<VideoRepaint>> { puts stderr "VideoRepaint" }
+    bind $v <<VideoDeviceLost>> { puts stderr "VideoDeviceLost" }
     bind $v <Configure> { onConfigure %W %x %y %w %h }
     
     if {$nottk} {
