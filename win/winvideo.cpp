@@ -80,6 +80,7 @@ static int VideopWidgetTellCmd(ClientData clientData, Tcl_Interp *interp, int ob
 static int VideopWidgetPictureCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[]);
 static int VideopWidgetInvalidCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[]);
 static int VideopWidgetOverlayCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[]);
+static int VideopWidgetFormatCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[]);
 
 struct Ensemble {
     const char *name;          /* subcommand name */
@@ -101,6 +102,7 @@ struct Ensemble VideoWidgetEnsemble[] = {
     { "tell",         VideopWidgetTellCmd,     NULL },
     { "picture",      VideopWidgetPictureCmd,  NULL },
     { "overlay",      VideopWidgetOverlayCmd,  NULL }, /* this should probably be a configure option */
+    { "format",       VideopWidgetFormatCmd,   NULL }, /* this should probably be a configure option */
     { NULL, NULL, NULL }
 };
 
@@ -541,6 +543,69 @@ VideopWidgetPictureCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_
             imageName = Tcl_GetString(objv[2]);
         }
         r = GrabSample(videoPtr, imageName);
+    }
+    return r;
+}
+
+int
+VideopWidgetFormatCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[])
+{
+    Video *videoPtr = (Video *)clientData;
+    VideoPlatformData *pPlatformData = (VideoPlatformData *)videoPtr->platformData;
+    int r = TCL_OK;
+    HRESULT hr = S_OK;
+
+    if (objc < 2 || objc > 3) {
+        Tcl_WrongNumArgs(interp, 2, objv, "?format?");
+        r = TCL_ERROR;
+    } else {
+        CComPtr<IBaseFilter> pCaptureFilter;
+
+        if (pPlatformData->pFilterGraph == NULL) {
+            Tcl_SetObjResult(interp, Tcl_NewStringObj("error: no video source initialized", -1));
+            return TCL_ERROR;
+        }
+
+        hr = pPlatformData->pFilterGraph->FindFilterByName(CAPTURE_FILTER_NAME, &pCaptureFilter);
+        if (SUCCEEDED(hr))
+        {
+            CComPtr<IPin> pCapturePin;
+            hr = FindPinByCategory(pCaptureFilter, PIN_CATEGORY_CAPTURE, &pCapturePin);
+            if (SUCCEEDED(hr) && pCapturePin)
+            {
+                CComPtr<IAMStreamConfig> pStreamConfig;
+                hr = pCapturePin.QueryInterface(&pStreamConfig);
+                if (SUCCEEDED(hr))
+                {
+                    AM_MEDIA_TYPE *pmt = 0;
+                    hr = pStreamConfig->GetFormat(&pmt);
+                    
+                    if (FAILED(hr))
+                        //hr = pCapturePin->ConnectionMediaType(pmt);
+                        ATLASSERT(SUCCEEDED(hr) && _T("You need to use pPin->ConnectionMediaType"));
+                    if (SUCCEEDED(hr))
+                    {
+                        if (pmt->formattype == FORMAT_VideoInfo)
+                        {
+                            Tcl_Obj *resultObj = NULL;
+                            VIDEOINFOHEADER *pvih = reinterpret_cast<VIDEOINFOHEADER *>(pmt->pbFormat);
+                            resultObj = Tcl_NewListObj(0, NULL);
+                            Tcl_ListObjAppendElement(interp, resultObj, Tcl_NewStringObj("framerate", -1));
+                            Tcl_ListObjAppendElement(interp, resultObj, Tcl_NewDoubleObj(10000000.0 / pvih->AvgTimePerFrame));
+                            Tcl_ListObjAppendElement(interp, resultObj, Tcl_NewStringObj("width", -1));
+                            Tcl_ListObjAppendElement(interp, resultObj, Tcl_NewIntObj((int)abs(pvih->bmiHeader.biWidth)));
+                            Tcl_ListObjAppendElement(interp, resultObj, Tcl_NewStringObj("height", -1));
+                            Tcl_ListObjAppendElement(interp, resultObj, Tcl_NewIntObj((int)abs(pvih->bmiHeader.biHeight)));
+                            Tcl_SetObjResult(interp, resultObj);
+                        }
+                        FreeMediaType(pmt);
+                    }
+                }
+            }
+        }
+        if (FAILED(hr))
+            Tcl_SetObjResult(interp, Win32Error("failed to get stream format", hr));
+        r = SUCCEEDED(hr) ? TCL_OK : TCL_ERROR;
     }
     return r;
 }
