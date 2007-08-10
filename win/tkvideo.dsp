@@ -94,6 +94,10 @@ SOURCE=.\filter.cpp
 # End Source File
 # Begin Source File
 
+SOURCE=.\graph.cpp
+# End Source File
+# Begin Source File
+
 SOURCE=..\generic\tkvideo.c
 # End Source File
 # Begin Source File
@@ -111,6 +115,10 @@ SOURCE=.\dshow_utils.h
 # Begin Source File
 
 SOURCE=.\filter.h
+# End Source File
+# Begin Source File
+
+SOURCE=.\graph.h
 # End Source File
 # Begin Source File
 

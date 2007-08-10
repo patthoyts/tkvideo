@@ -167,6 +167,7 @@ STUBPREFIX      = $(PROJECT)stub
 DLLOBJS = \
 	$(TMP_DIR)\tkvideo.obj \
 	$(TMP_DIR)\winvideo.obj \
+	$(TMP_DIR)\graph.obj \
 	$(TMP_DIR)\dshow_utils.obj \
 	$(TMP_DIR)\tkvideo.res
 

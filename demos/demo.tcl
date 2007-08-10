@@ -316,6 +316,28 @@ proc ::bgerror {msg} {
 	    -message $msg
 }
 
+proc About {mw} {
+    set dlg [toplevel $mw.about -class Dialog]
+	text $dlg.t -background SystemButtonFace -width 64 -height 10 -relief flat
+	$dlg.t tag configure center -justify center
+	$dlg.t tag configure h1 -font {Arial 14 bold}
+	$dlg.t tag configure link -underline 1
+	$dlg.t tag configure copy
+	$dlg.t insert end "tkvideo widget demo" {center h1} "\n\n" {} \
+	    "http://tkvideo.berlios.de/" {center link} "\n\n" {} \
+        "The tkvideo widget uses DirectX to render video and audio multimedia data from\
+		 data files or from capture devices like webcams." {} "\n\n" {} \
+		"Copyright (c) 2003-2007 Pat Thoyts <patthoyts@users.sourceforge.net>" {center copy}
+	$dlg.t configure -state disabled
+    button $dlg.bok -text OK -command [list set ::$dlg 1]
+	grid $dlg.t   -sticky news
+    grid $dlg.bok -sticky e
+	grid rowconfigure $dlg 0 -weight 1
+	grid columnconfigure $dlg 0 -weight 1
+    tkwait variable ::$dlg
+	destroy $dlg
+	return
+}
 # -------------------------------------------------------------------------
 #
 # Create the basic widgets and menus.
@@ -326,7 +348,7 @@ proc Main {mw {filename {}}} {
     variable images
     set Application [namespace current]::demo[incr uid]
     upvar #0 $Application app
-    array set app [list main $mw stretch 1 videoindex 0 \
+    array set app [list main $mw stretch 0 videoindex 0 \
                        audioindex "No audio" savefile {} \
                        poslabel [DisplayTime 0] ]
 
@@ -335,7 +357,7 @@ proc Main {mw {filename {}}} {
 
     set v [tkvideo $mw.v \
                -stretch $app(stretch) \
-               -background SteelBlue \
+               -background SystemAppWorkspace \
                -width 320 -height 240]
     set app(video) $v
 
@@ -406,6 +428,11 @@ proc Main {mw {filename {}}} {
     $menu.file add cascade -label "Audio source" -underline 0 \
         -menu [menu $menu.file.audio -tearoff 0]
     $menu.file add separator
+	$menu.file add command -label "Properties ..." -underline 0 \
+	    -command [list $v propertypage filter]
+    $menu.file add command -label "Stream format properties ..." -underline 0 \
+	    -command [list $v propertypage pin]
+	$menu.file add separator
     $menu.file add command -label "Record ..." -underline 1 \
         -command [list Record $Application]
     $menu.file add command -label "Snapshot" -underline 1 \
@@ -485,6 +512,9 @@ proc Main {mw {filename {}}} {
         $menu.file insert $ndx checkbutton -label Console -underline 0 \
             -variable ::console -command toggleconsole -accel "Ctrl-F2"
     }
+
+    $menu add cascade -label Help -underline 0 -menu [menu $menu.help -tearoff 0]
+	$menu.help add command -label About -underline 0 -command [list [namespace origin About] $mw]
 
     #
     # Connect the the first webcam or hook up the file and start previewing.
