@@ -12,7 +12,46 @@ package require Tk 8.4
 package require tkvideo 1.2.0
 
 variable noimg [catch {package require Img}]
-variable nottk [catch {package require tile}]
+
+# Handle the various versions of tile/ttk
+variable useTile
+if {![info exists useTile]} {
+    variable useTile 1
+    variable NS "::ttk"
+    if {[llength [info commands ::ttk::*]] == 0} {
+        if {![catch {package require tile 0.8}]} {
+            # we're all good
+        } elseif {![catch {package require tile 0.7}]} {
+            # tile to ttk compatability
+            interp alias {} ::ttk::style {} ::style
+            interp alias {} ::ttk::setTheme {} ::tile::setTheme
+            interp alias {} ::ttk::themes {} ::tile::availableThemes
+            interp alias {} ::ttk::LoadImages {} ::tile::LoadImages
+        } else {
+            set useTile 0
+            set NS "::tk"
+        }
+    } else {
+        # we have ttk in tk85
+    }
+    if {$useTile && [tk windowingsystem] eq "aqua"} {
+        # use native scrollbars on the mac
+        if {[llength [info commands ::ttk::_scrollbar]] == 0} {
+            rename ::ttk::scrollbar ::ttk::_scrollbar
+            interp alias {} ::ttk::scrollbar {} ::tk::scrollbar
+        }
+    }
+    # Ensure that Tk widgets are available in the tk namespace. This is useful
+    # if we are using Ttk widgets as sometimes we need the originals.
+    #
+    if {[llength [info commands ::tk::label]] < 1} {
+        foreach cmd { label entry text canvas menubutton button frame labelframe \
+                          radiobutton checkbutton scale scrollbar} {
+            rename ::$cmd ::tk::$cmd
+            interp alias {} ::$cmd {} ::tk::$cmd
+        }
+    }
+}
 
 variable uid  ; if {![info exists uid]}  { set uid 0 }
 variable init ; if {![info exists init]} { set init 0 }
@@ -38,7 +77,6 @@ proc onStretch {Application} {
 
 proc onFileOpen {Application} {
     upvar #0 $Application app
-    variable nottk
     set file [tk_getOpenFile -defaultextension avi \
                   -filetypes {
                       {"Movie files" {.avi .mpg .mpeg .wmv} {}}
@@ -87,15 +125,12 @@ proc RepeatSnapJob {Application filename} {
 
 proc UpdatePosition {Application} {
     upvar #0 $Application app
-    variable nottk
     catch {
         foreach {cur stp dur} [$app(video) tell] break
         set app(position) [expr {$cur / 1000.0}]
         SetScaleLabel $app(slider) $app(sliderlabel) \
             [set Application](poslabel) $cur
-        if {!$nottk} {
-            $app(slider) configure -value $app(position)
-        }
+        $app(slider) configure -value $app(position)
     }
     set app(after) [after 100 [list UpdatePosition $Application]]
 }
@@ -131,7 +166,9 @@ proc Start {Application} {
     upvar #0 $Application app
     variable images
     $app(play) configure -image $images(5) -command [list Pause $Application]
+    catch {after cancel $app(after)}
     $app(video) start
+    set app(after) [after idle [list UpdatePosition $Application]]
 }
 
 proc Pause {Application} {
@@ -183,6 +220,8 @@ proc Record {Application} {
 }
 
 proc onComplete {Application} {
+    upvar #0 $Application app
+    catch {after cancel $app(after)}
     Pause $Application
 }
 
@@ -193,21 +232,15 @@ proc onConfigure {W x y w h} {
 
 proc SetFileSource {Application filename} {
     upvar #0 $Application app
-    variable nottk
     $app(video) configure -source $filename
     Pause $Application
     foreach {cur stop dur} [$app(video) tell] break
-    if {$nottk} {
-        $app(slider) configure -state normal
-    } else {
-        $app(slider) state !disabled
-    }
+    SetState $app(slider) normal
     $app(slider) configure -from 0 -to [expr {$dur/1000.0}]
 }
 
 proc SetDeviceSource {Application} {
     upvar #0 $Application app
-    variable nottk
     puts stderr "$app(video) configure -source $app(videoindex)\
         -audio $app(audioindex) -output [file nativename $app(savefile)]"
     set vndx [lsearch [$app(video) devices video] $app(videoindex)]
@@ -215,11 +248,7 @@ proc SetDeviceSource {Application} {
     $app(video) configure -source $vndx -audio $andx \
         -output [file nativename $app(savefile)]
     $app(slider) configure -from 0 -to 0
-    if {$nottk} {
-        $app(slider) configure -state disabled
-    } else {
-        $app(slider) state disabled
-    }
+    SetState $app(slider) disabled
     Pause $Application
 }
 
@@ -228,20 +257,26 @@ proc SetDeviceSource {Application} {
 # Snapshots are displayed in their own dialog window
 #
 proc Snapshot {Application} {
+    variable NS
     upvar #0 $Application app
     set img [$app(video) picture]
     if {$img ne {}} {
         variable uid
         set dlg [toplevel .t[incr uid] -class SnapshotDialog]
-        #wm maxsize $dlg [$img cget -width] [$img cget -height]
-        label $dlg.im -image $img
-        button $dlg.bx -text "Close" -command [list SnapClose $dlg $img]
-        button $dlg.bs -text "Save as" -command [list SnapSaveAs $img]
+        wm transient $dlg $app(main)
+        wm withdraw $dlg
+        ${NS}::label $dlg.im -image $img
+        ${NS}::button $dlg.bx -text "Close" -command [list SnapClose $dlg $img]
+        ${NS}::button $dlg.bs -text "Save as" -command [list SnapSaveAs $img]
+        wm protocol $dlg WM_DELETE_WINDOW [list SnapClose $dlg $img]
+        bind $dlg <Return> [list $dlg.bs invoke]
+        bind $dlg <Escape> [list $dlg.bx invoke]
         grid $dlg.im - -sticky news
         grid $dlg.bs $dlg.bx -sticky nse
         grid rowconfigure $dlg 0 -weight 1
         grid columnconfigure $dlg 0 -weight 1
-        tkwait visibility $dlg.im
+        wm deiconify $dlg
+        focus $dlg.bs
     }
 }
 
@@ -279,11 +314,124 @@ proc SnapSaveAs {img} {
 }
 
 # -------------------------------------------------------------------------
+# Serve up an MJPEG stream
+
+proc StreamServer {Application {port 8020}} {
+    upvar #0 $Application app
+    set app(stream_server) [socket -server [list StreamAccept $Application] $port]
+    set app(stream_timer) [after idle [list StreamSend $Application]]
+    set app(stream_interval) 1000
+    set app(stream_clients) {}
+    if {[catch {package require vfs::mk4}]} {
+        set tmpdir $::env(TEMP)
+        set app(stream_tempfile) [file join $tmpdir tmp.jpg]
+    } else {
+        vfs::mk4::Mount {} tmpfs
+        set app(stream_tempfile) tmpfs/tmp.jpg
+    }
+}
+proc StreamAccept {Application chan clientaddr clientport} {
+    upvar #0 $Application app
+    variable suid; if {![info exists suid]} { set suid 0 }
+    set token ::stream[incr suid]
+    upvar #0 $token state
+    set state(mode) connect
+    set state(app) $Application
+    set state(chan) $chan
+    set state(client) [list $clientaddr $clientport]
+    set state(request) {}
+    set state(boundary) "--myboundary"
+    lappend app(stream_clients) $token
+    fconfigure $chan -encoding utf-8 -translation crlf -buffering line
+    fileevent $chan readable [list StreamRead $token]
+}
+proc StreamClose {token} {
+    upvar #0 $token state
+    upvar #0 $state(app) app
+    puts stderr "$state(client) has disconnected"
+    catch {after cancel $state(timer)}
+    catch {close $state(chan)}
+    set ndx [lsearch -exact $app(stream_clients) $token]
+    if {$ndx != -1} {
+        set app(stream_clients) [lreplace $app(stream_clients) $ndx $ndx]
+    }
+    unset $token
+}
+proc StreamRead {token} {
+    upvar #0 $token state
+    if {[eof $state(chan)]} {
+        fileevent $state(chan) readable {}
+        StreamClose $token
+        return
+    }
+    switch -exact -- $state(mode) {
+        connect {
+            set count [gets $state(chan) line]
+            puts stderr "connect: read '$line'"
+            if {$count == -1} {
+                StreamClose $token
+            } elseif {$count == 0} {
+                set state(mode) init
+                fileevent $state(chan) writable [list StreamWrite $token]
+            } else {
+                lappend state(request) $line
+            }
+        }
+        default {
+            set data [read $state(chan)]
+            puts stderr "recieved [string length $data] bytes"
+        }
+    }
+}
+proc StreamWrite {token} {
+    upvar #0 $token state
+    fileevent $state(chan) writable {}
+    puts $state(chan) "HTTP/1.1 200 OK"
+    puts $state(chan) [clock format [clock seconds] -gmt 1 \
+                           -format "%a, %d %b  %Y %H:%M:%S GMT"]
+    puts $state(chan) "Server: Tkvideo/1.0"
+    puts $state(chan) "Connection: close"
+    puts $state(chan) "Content-Type: multipart/x-mixed-replace;\
+                boundary=$state(boundary)"
+    puts $state(chan) ""
+    set state(mode) transmit
+}
+proc StreamSend {Application} {
+    upvar #0 $Application app
+    if {[llength $app(stream_clients)] > 0} {
+        if {[catch {
+            set img [$app(video) picture]
+            $img write $app(stream_tempfile) -format jpeg
+            image delete $img
+            set f [open $app(stream_tempfile) r]
+            fconfigure $f -encoding binary -translation binary -eofchar {}
+            set data [read $f]
+            close $f
+        
+            foreach client $app(stream_clients) {
+                upvar #0 $client state
+                if {$state(mode) ne "transmit"} continue
+                fconfigure $state(chan) -encoding utf-8 -translation crlf -buffering line
+                puts $state(chan) $state(boundary)
+                puts $state(chan) "Content-Type: image/jpeg"
+                puts $state(chan) "Content-Length: [string length $data]"
+                puts $state(chan) ""
+                fconfigure $state(chan) -encoding binary -translation binary -buffering full
+                puts -nonewline $state(chan) $data\r\n
+                flush $state(chan)
+            }
+        } err]} {
+            puts stderr "error: $err"
+        }
+    }
+    set app(stream_timer) [after $app(stream_interval) [list StreamSend $Application]]
+}
+
+# -------------------------------------------------------------------------
 #
 # Use Tile widgets if available
 #
 proc Init {} {
-    variable nottk
     variable init
     variable imgdata
     variable images
@@ -299,51 +447,65 @@ proc Init {} {
             $images($n) copy $image \
                 -from [expr {16 * $n}] 0 [expr {16 * ($n + 1)}] 16
         }
-        
-        if {!$nottk} {
-            foreach class {scrollbar scale button checkbutton label} {
-                rename ::$class ::tk::$class
-                interp alias {} ::$class {} ::ttk::$class
-            }
-        }
         set init 1
     }
     return
 }
 
 proc ::bgerror {msg} {
-    tk_messageBox -icon error -title "Application Error" \
-	    -message $msg
+    tk_messageBox -icon error -title "Application Error" -message $::errorInfo
 }
 
 proc About {mw} {
+    variable NS
     set dlg [toplevel $mw.about -class Dialog]
-	text $dlg.t -background SystemButtonFace -width 64 -height 10 -relief flat
-	$dlg.t tag configure center -justify center
-	$dlg.t tag configure h1 -font {Arial 14 bold}
-	$dlg.t tag configure link -underline 1
-	$dlg.t tag configure copy
-	$dlg.t insert end "tkvideo widget demo" {center h1} "\n\n" {} \
-	    "http://tkvideo.berlios.de/" {center link} "\n\n" {} \
+    wm title $dlg "About TkVideo"
+    wm transient $dlg $mw
+    wm withdraw $dlg
+    ${NS}::frame $dlg.base
+    text $dlg.t -background SystemButtonFace -width 64 -height 10 -relief flat
+    $dlg.t tag configure center -justify center
+    $dlg.t tag configure h1 -font {Arial 14 bold}
+    $dlg.t tag configure link -underline 1
+    $dlg.t tag configure copy
+    $dlg.t insert end \
+        "tkvideo widget demo" {center h1} "\n\n" {} \
+        "http://tkvideo.berlios.de/" {center link} "\n\n" {} \
         "The tkvideo widget uses DirectX to render video and audio multimedia data from\
-		 data files or from capture devices like webcams." {} "\n\n" {} \
-		"Copyright (c) 2003-2007 Pat Thoyts <patthoyts@users.sourceforge.net>" {center copy}
-	$dlg.t configure -state disabled
-    button $dlg.bok -text OK -command [list set ::$dlg 1]
-	grid $dlg.t   -sticky news
-    grid $dlg.bok -sticky e
-	grid rowconfigure $dlg 0 -weight 1
-	grid columnconfigure $dlg 0 -weight 1
+            data files or from capture devices like webcams." {} "\n\n" {} \
+        "Copyright (c) 2003-2007 Pat Thoyts <patthoyts@users.sourceforge.net>" {center copy}
+    $dlg.t configure -state disabled
+    ${NS}::button $dlg.bok -text OK -command [list set ::$dlg 1]
+    grid $dlg.t   -in $dlg.base -sticky news
+    grid $dlg.bok -in $dlg.base -sticky e
+    grid $dlg.base -sticky news
+    grid rowconfigure $dlg.base 0 -weight 1
+    grid columnconfigure $dlg.base 0 -weight 1
+    grid rowconfigure $dlg 0 -weight 1
+    grid columnconfigure $dlg 0 -weight 1
+    ::tk::PlaceWindow $dlg widget $mw
+    wm deiconify $dlg
     tkwait variable ::$dlg
-	destroy $dlg
-	return
+    destroy $dlg
+    return
 }
+
+proc SetState {w state} {
+    variable useTile
+    if {$useTile} {
+        if {$state eq "normal"} {set state !disabled}
+        $w state $state
+    } else {
+        $w configure -state $state
+    }
+}
+
 # -------------------------------------------------------------------------
 #
 # Create the basic widgets and menus.
 #
 proc Main {mw {filename {}}} {
-    variable nottk
+    variable useTile ; variable NS
     variable uid
     variable images
     set Application [namespace current]::demo[incr uid]
@@ -369,40 +531,35 @@ proc Main {mw {filename {}}} {
     bind $v <<VideoDeviceLost>> { puts stderr "VideoDeviceLost" }
     bind $v <Configure> { onConfigure %W %x %y %w %h }
     
-    if {$nottk} {
-        set buttons [frame $mw.buttons]
-    } else {
-        set buttons [ttk::frame $mw.buttons]
-    }
-
-    set sy [scrollbar $mw.sy  -orient vertical   -command [list $v yview]]
-    set sx [scrollbar $mw.sx  -orient horizontal -command [list $v xview]]
+    set buttons [${NS}::frame $mw.buttons]
+    set sy [${NS}::scrollbar $mw.sy  -orient vertical   -command [list $v yview]]
+    set sx [${NS}::scrollbar $mw.sx  -orient horizontal -command [list $v xview]]
     $v configure -xscrollcommand [list $sx set] -yscrollcommand [list $sy set]
 
-    set app(sliderlabel) [label $mw.float \
+    set app(sliderlabel) [${NS}::label $mw.float \
                               -textvariable [set Application](poslabel)]
-    set app(slider) [scale $mw.pos -orient horizontal -from 0 -to 0 \
+    set app(slider) [${NS}::scale $mw.pos -orient horizontal -from 0 -to 0 \
                          -variable [set Application](position) \
                          -command [list Seek $Application]];#  -showvalue 0
-    if {$nottk} {$app(slider) configure -state disabled} else {$app(slider) state disabled}
+    SetState $app(slider) disabled
     
-    set app(rewd) [button $buttons.rewind -image $images(2) \
+    set app(rewd) [${NS}::button $buttons.rewind -image $images(2) \
                        -command [list Rewind $Application]]
-    set app(back) [button $buttons.back -image $images(0) \
+    set app(back) [${NS}::button $buttons.back -image $images(0) \
                        -command [list Skip $Application -250]]
-    set app(play) [button $buttons.play   -image $images(4) \
+    set app(play) [${NS}::button $buttons.play   -image $images(4) \
                        -command [list Start $Application]]
-    set app(fwd)  [button $buttons.fwd  -image $images(1) \
+    set app(fwd)  [${NS}::button $buttons.fwd  -image $images(1) \
                        -command [list Skip $Application 250]]
-    set app(ffwd) [button $buttons.ffwd   -image $images(3) \
+    set app(ffwd) [${NS}::button $buttons.ffwd   -image $images(3) \
                        -command [list FastForward $Application]]
-    set app(stop) [button $buttons.stop   -image $images(6) \
+    set app(stop) [${NS}::button $buttons.stop   -image $images(6) \
                        -command [list Stop $Application]]
-    set app(snap) [button $buttons.snap   -image $images(8) \
+    set app(snap) [${NS}::button $buttons.snap   -image $images(8) \
                        -command [list Snapshot $Application]]
-    set app(prop) [button $buttons.props  -image $images(9) \
+    set app(prop) [${NS}::button $buttons.props  -image $images(9) \
                        -command [list $v prop filter]]
-    checkbutton $buttons.stretch -text Stretch \
+    ${NS}::checkbutton $buttons.stretch -text Stretch \
         -variable [set Application](stretch) \
         -command [list onStretch $Application]
 
@@ -478,19 +635,24 @@ proc Main {mw {filename {}}} {
     #
     # Create a themes menu if tile is loaded
     #
-    if {[package provide tile] != {}} {
-        $menu add cascade -label "Tk themes" \
-            -menu [menu $menu.themes -tearoff 0]
-        foreach theme [tile::availableThemes] {
-            $menu.themes add radiobutton -label [string totitle $theme] \
-                -variable ::Theme \
-                -value $theme \
-                -command [list SetTheme $theme]
-        }
+    # Tile Themes Cascade Menu
+    if { $useTile } {
+        set themes [lsort [ttk::themes]]
+
+	menu $menu.themes -tearoff 0
+	$menu add cascade -label "Tk themes" -menu $menu.themes
+	foreach theme $themes {
+	    $menu.themes add radiobutton \
+		    -label [string totitle $theme] \
+		    -variable ::Theme \
+		    -value $theme \
+		    -command [list SetTheme $theme]
+	}
+	$menu add separator
         proc SetTheme {theme} {
-            global Theme
+            global Theme ; variable useTile
             catch {
-                tile::setTheme $theme
+                if {$useTile} { ttk::setTheme $theme }
                 set Theme $theme
             }
         }
@@ -505,17 +667,16 @@ proc Main {mw {filename {}}} {
             global console
             if {$console} {console show} else {console hide}
         }
-        
         bind $mw <Control-F2> {toggleconsole}
-        
         set ndx [$menu.file index end]
         $menu.file insert $ndx checkbutton -label Console -underline 0 \
             -variable ::console -command toggleconsole -accel "Ctrl-F2"
     }
 
     $menu add cascade -label Help -underline 0 -menu [menu $menu.help -tearoff 0]
-	$menu.help add command -label About -underline 0 -command [list [namespace origin About] $mw]
-
+    $menu.help add command -label About -underline 0 \
+        -command [list [namespace origin About] $mw]
+    
     #
     # Connect the the first webcam or hook up the file and start previewing.
     #
@@ -525,6 +686,7 @@ proc Main {mw {filename {}}} {
         set app(videoindex) [lindex $vdevs 0]
         set app(audioindex) [lindex $adevs 0]
         SetDeviceSource $Application
+        StreamServer $Application
         Start $Application
     }
         
@@ -534,10 +696,12 @@ proc Main {mw {filename {}}} {
 }
 
 if {!$tcl_interactive} {
-    wm withdraw .
     Init
-    Main [toplevel .demo -class TkvideoDemo] [lindex $argv 0]
-    exit 0
+    if {![winfo exists .demo]} {
+        wm withdraw .
+        Main [toplevel .demo -class TkvideoDemo] [lindex $argv 0]
+        exit 0
+    }
 }
 
 # Local variables:
