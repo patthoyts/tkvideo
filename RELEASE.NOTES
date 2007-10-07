@@ -1,6 +1,14 @@
 RELEASE NOTES                                              -*- text -*-
 -----------------------------------------------------------------------
 
+Version 1.3.0                                              (10-Aug-2007)
+-------------
+
+Rearranged the DirectX filter graph construction so that it can be
+stopped and re-connected which allows changing the stream format for
+the capature filter pins. Added a format and framerate command to
+permit setting the new stream format programatically.
+
 Version 1.2.1                                              (20-Sep-2005)
 -------------
 
