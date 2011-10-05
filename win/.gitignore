@@ -1,0 +1,9 @@
+/Debug/
+/Release/
+/Debug_*/
+/Release_*/
+/_junk.pch
+/nmakehlp.exe
+/nmakehlp.obj
+/versions.vc
+/vc*.pdb
