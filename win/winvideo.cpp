@@ -21,6 +21,7 @@
 #include "tkvideo.h"
 #include <tkPlatDecls.h>
 #include "graph.h"
+#include <math.h>
 
 /** Application specific window message for filter graph notifications */
 #define WM_GRAPHNOTIFY WM_APP + 82
@@ -73,6 +74,7 @@ static int VideopWidgetInvalidCmd(ClientData clientData, Tcl_Interp *interp, int
 static int VideopWidgetOverlayCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[]);
 static int VideopWidgetStreamConfigCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[]);
 static int VideopWidgetFormatsCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[]);
+static int VideopWidgetVolumeCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[]);
 
 struct Ensemble {
     const char *name;          /* subcommand name */
@@ -98,6 +100,7 @@ struct Ensemble VideoWidgetEnsemble[] = {
     { "framerate",    VideopWidgetStreamConfigCmd, NULL }, /* this should probably be a configure option */
     { "formats",      VideopWidgetFormatsCmd,  NULL }, /* this should probably be a configure option */
     { "framerates",   VideopWidgetFormatsCmd,  NULL }, /* this should probably be a configure option */
+    { "volume",       VideopWidgetVolumeCmd, NULL},
     { NULL, NULL, NULL }
 };
 
@@ -789,6 +792,61 @@ VideopWidgetFormatsCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_
     if (FAILED(hr)) {
         Tcl_SetObjResult(interp, Win32Error("failed to get stream config", hr));
         r = TCL_ERROR;
+    }
+    return r;
+}
+
+int
+VideopWidgetVolumeCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj *CONST objv[])
+{
+    Video *videoPtr = (Video *)clientData;
+    VideoPlatformData *platformPtr = (VideoPlatformData *)videoPtr->platformData;
+    IBasicAudio *pBasicAudio = NULL;
+    double value = 0;
+    long db = 0;
+    HRESULT hr = S_OK;
+    int r = TCL_OK;
+
+    if (objc < 2 || objc > 3) {
+        Tcl_WrongNumArgs(interp, 1, objv, "?newval?");
+        return TCL_ERROR;
+    }
+
+    if (platformPtr->pFilterGraph == NULL) {
+        Tcl_SetObjResult(interp, Tcl_NewStringObj("error: no video source initialized", -1));
+        return TCL_ERROR;
+    }
+
+    if (SUCCEEDED( platformPtr->pFilterGraph->QueryInterface(&pBasicAudio) ))
+    {
+        /*
+         * volume can range (in 100x dB) from -10000 (silent) to 0 (maxvol)
+         * But its more useful to use a linear scale of 0 .. 100. dB is logarithmic.
+         * dB = (log10(percent * 99.0 / 100.0 + 1) - 2) * 5000
+         */
+        if (objc == 3) {
+            r = Tcl_GetDoubleFromObj(interp, objv[2], &value);
+            if (TCL_OK == r) {
+                db = static_cast<long>((log10(value * 99.0 / 100.0 + 1.0) - 2.0) * 5000.0);
+                hr = pBasicAudio->put_Volume(db);
+            }
+        } else {
+            hr = pBasicAudio->get_Volume(&db);
+        }
+        pBasicAudio->Release();
+    }
+    else
+    {
+        Tcl_SetObjResult(interp, Tcl_NewStringObj("error: no audio interface available", -1));
+        return TCL_ERROR;
+    }
+
+    if (FAILED(hr)) {
+        Tcl_SetObjResult(interp, Win32Error("error", hr));
+        r = TCL_ERROR;
+    } else {
+        value = pow(10, (db / 5000.0 + 2.0)) * 100.0 / 99.0 - 1.0;
+        Tcl_SetObjResult(interp, Tcl_NewDoubleObj(value));
     }
     return r;
 }

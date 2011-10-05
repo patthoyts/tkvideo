@@ -9,7 +9,7 @@
 # $Id$
 
 package require Tk 8.4
-package require tkvideo 1.3.0
+package require tkvideo 1.4.0
 
 variable noimg [catch {package require Img}]
 
@@ -132,6 +132,9 @@ proc UpdatePosition {Application} {
             [set Application](poslabel) $cur
         $app(slider) configure -value $app(position)
     }
+    catch {
+        $app(vol) configure -value [$app(video) volume]
+    }
     set app(after) [after 100 [list UpdatePosition $Application]]
 }
 
@@ -160,6 +163,11 @@ proc Seek {Application value} {
     catch {
         $app(video) seek [expr {int($value * 1000)}]
     }
+}
+
+proc Volume {Application value} {
+    upvar #0 $Application app
+    catch {$app(video) volume $value}
 }
 
 proc Start {Application} {
@@ -504,6 +512,10 @@ proc SetState {w state} {
     }
 }
 
+proc ScrollSet {w args} {
+    catch {$w set {*}$args}
+}
+
 # -------------------------------------------------------------------------
 #
 # Create the basic widgets and menus.
@@ -538,7 +550,7 @@ proc Main {mw {filename {}}} {
     set buttons [${NS}::frame $mw.buttons]
     set sy [${NS}::scrollbar $mw.sy  -orient vertical   -command [list $v yview]]
     set sx [${NS}::scrollbar $mw.sx  -orient horizontal -command [list $v xview]]
-    $v configure -xscrollcommand [list $sx set] -yscrollcommand [list $sy set]
+    $v configure -xscrollcommand [list ScrollSet $sx] -yscrollcommand [list ScrollSet $sy]
 
     set app(sliderlabel) [${NS}::label $mw.float \
                               -textvariable [set Application](poslabel)]
@@ -566,10 +578,16 @@ proc Main {mw {filename {}}} {
     ${NS}::checkbutton $buttons.stretch -text Stretch \
         -variable [set Application](stretch) \
         -command [list onStretch $Application]
+    set app(lvol) [${NS}::label $buttons.lvol -text "Volume"]
+    set app(vol) [${NS}::scale $buttons.vol -orient horizontal -from 0 -to 100 \
+                      -variable [set Application](volume) \
+                      -command [list Volume $Application]]
 
     pack $app(rewd) $app(back) $app(play) $app(fwd) $app(ffwd) \
         $app(stop) $app(snap) $app(prop) \
         $buttons.stretch -side left
+    pack $app(lvol) -side left -anchor w
+    pack $app(vol) -side left -anchor w -expand 1
     
     grid $v        $sy   -sticky news
     grid $sx       -     -sticky news
