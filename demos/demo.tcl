@@ -9,7 +9,7 @@
 # $Id$
 
 package require Tk 8.4
-package require tkvideo 1.2.0
+package require tkvideo 1.3.0
 
 variable noimg [catch {package require Img}]
 
@@ -232,11 +232,15 @@ proc onConfigure {W x y w h} {
 
 proc SetFileSource {Application filename} {
     upvar #0 $Application app
-    $app(video) configure -source $filename
-    Pause $Application
-    foreach {cur stop dur} [$app(video) tell] break
-    SetState $app(slider) normal
-    $app(slider) configure -from 0 -to [expr {$dur/1000.0}]
+    if {[catch {
+        $app(video) configure -source $filename
+        Pause $Application
+        foreach {cur stop dur} [$app(video) tell] break
+        SetState $app(slider) normal
+        $app(slider) configure -from 0 -to [expr {$dur/1000.0}]
+    } err]} {
+        $app(slider) configure -from 0 -to 1
+    }
 }
 
 proc SetDeviceSource {Application} {
@@ -340,7 +344,8 @@ proc StreamAccept {Application chan clientaddr clientport} {
     set state(chan) $chan
     set state(client) [list $clientaddr $clientport]
     set state(request) {}
-    set state(boundary) "--myboundary"
+    binary scan [binary format f [expr {rand()}]] H* r
+    set state(boundary) "--boundary$r"
     lappend app(stream_clients) $token
     fconfigure $chan -encoding utf-8 -translation crlf -buffering line
     fileevent $chan readable [list StreamRead $token]
@@ -391,8 +396,7 @@ proc StreamWrite {token} {
                            -format "%a, %d %b  %Y %H:%M:%S GMT"]
     puts $state(chan) "Server: Tkvideo/1.0"
     puts $state(chan) "Connection: close"
-    puts $state(chan) "Content-Type: multipart/x-mixed-replace;\
-                boundary=$state(boundary)"
+    puts $state(chan) "Content-Type: multipart/x-mixed-replace;boundary=$state(boundary)"
     puts $state(chan) ""
     set state(mode) transmit
 }
@@ -412,7 +416,7 @@ proc StreamSend {Application} {
                 upvar #0 $client state
                 if {$state(mode) ne "transmit"} continue
                 fconfigure $state(chan) -encoding utf-8 -translation crlf -buffering line
-                puts $state(chan) $state(boundary)
+                puts $state(chan) "$state(boundary)"
                 puts $state(chan) "Content-Type: image/jpeg"
                 puts $state(chan) "Content-Length: [string length $data]"
                 puts $state(chan) ""
