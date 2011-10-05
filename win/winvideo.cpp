@@ -196,10 +196,12 @@ VideopInitializeSource(Video *videoPtr)
 
     pPlatformData->spec.nDeviceIndex = -1;
     pPlatformData->spec.nAudioIndex = -1;
-    wcsncpy(pPlatformData->spec.wszOutputPath, Tcl_GetUnicode(videoPtr->outputPtr), MAX_PATH);
+    wcsncpy(pPlatformData->spec.wszOutputPath,
+        (const wchar_t *)Tcl_GetUnicode(videoPtr->outputPtr), MAX_PATH);
 
     if (Tcl_GetIntFromObj(NULL, videoPtr->sourcePtr, &pPlatformData->spec.nDeviceIndex) != TCL_OK)
-        wcsncpy(pPlatformData->spec.wszSourcePath, Tcl_GetUnicode(videoPtr->sourcePtr), MAX_PATH);
+        wcsncpy(pPlatformData->spec.wszSourcePath,
+            (const wchar_t *)Tcl_GetUnicode(videoPtr->sourcePtr), MAX_PATH);
     if (Tcl_GetIntFromObj(NULL, videoPtr->audioPtr, &pPlatformData->spec.nAudioIndex) != TCL_OK)
         pPlatformData->spec.nAudioIndex = -1;
 
@@ -419,6 +421,8 @@ VideopWidgetControlCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_
         return TCL_ERROR;
     }
 
+    Tcl_ResetResult(interp);
+
     HRESULT hr = S_OK;
     switch (index) {
     case Video_Start:
@@ -503,6 +507,7 @@ VideopWidgetSeekCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj
             if (r == TCL_OK) {
                 t *= 10000; // convert from ms to 100ns
                 pPlatformData->pMediaSeeking->SetPositions(&t, AM_SEEKING_AbsolutePositioning, NULL, AM_SEEKING_NoPositioning);
+                Tcl_ResetResult(interp);
             }
         }
     }
@@ -548,6 +553,8 @@ VideopWidgetStreamConfigCmd(ClientData clientData, Tcl_Interp *interp, int objc,
         Tcl_SetObjResult(interp, Tcl_NewStringObj("error: no video source initialized", -1));
         return TCL_ERROR;
     }
+
+    Tcl_ResetResult(interp);
 
     hr = pPlatformData->pFilterGraph->FindFilterByName(CAPTURE_FILTER_NAME, &pCaptureFilter);
     if (SUCCEEDED(hr))
@@ -609,6 +616,7 @@ FramerateCmd(Video *videoPtr, IAMStreamConfig *pStreamConfig, AM_MEDIA_TYPE *pmt
         }
         else
         {
+            Tcl_ResetResult(interp);
             r = Tcl_GetDoubleFromObj(interp, objv[2], &dRate);
             if (r == TCL_OK)
             {
@@ -654,6 +662,7 @@ FormatCmd(Video *videoPtr, IAMStreamConfig *pStreamConfig, AM_MEDIA_TYPE *pmt, T
         }
         else
         {
+            Tcl_ResetResult(interp);
             if (sscanf(Tcl_GetString(objv[2]), "%dx%d", &width, &height) == 2)
             {
                 pvih->bmiHeader.biWidth = width;
@@ -803,7 +812,7 @@ VideopWidgetOverlayCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_
         if (objc == 3) {
             imageName = Tcl_GetString(objv[2]);
         }
-
+        Tcl_ResetResult(interp);
         HBITMAP hbm = NULL;
         r = PhotoToHBITMAP(interp, imageName, &hbm);
         if (hbm) {
@@ -820,14 +829,6 @@ VideopWidgetOverlayCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_
     }
     return r;
 }
-
-    //HBITMAP hbmTest = (HBITMAP)LoadImage(0, _T("logo.bmp"), IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE);
-    //if (hbmTest) {
-    //    WriteBitmapFile(hdc, hbmTest, _T("C:\\temp\\ztkvideo_test.bmp"));
-    //    DeleteObject(hbmTest);
-    //}
-    //WriteBitmapFile(hdc, platformData->hbmOverlay, _T("C:\\temp\\ztkvideo_overlay.bmp"));
-
 
 int
 PhotoToHBITMAP(Tcl_Interp *interp, const char *imageName, HBITMAP *phBitmap)
@@ -1030,8 +1031,10 @@ GetDeviceList(Tcl_Interp *interp, CLSID clsidCategory)
                 hr = pmks[n]->BindToStorage(pctx, NULL, IID_IPropertyBag, reinterpret_cast<void**>(&pbag));
                 if (SUCCEEDED(hr))
                     hr = pbag->Read(L"FriendlyName", &vName, NULL);
-                if (SUCCEEDED(hr))
-                    Tcl_ListObjAppendElement(interp, listPtr, Tcl_NewUnicodeObj(vName.bstrVal, -1));
+                if (SUCCEEDED(hr)) {
+                    Tcl_ListObjAppendElement(interp, listPtr, 
+                        Tcl_NewUnicodeObj((const Tcl_UniChar *)vName.bstrVal, -1));
+                }
 
                 pmks[n]->Release(),  pmks[n] = 0;
             }
@@ -1102,6 +1105,8 @@ ConnectVideo(Video *videoPtr, HWND hwnd, IVideoWindow **ppVideoWindow)
             hr = pVideoWindow->SetWindowPosition(rc.left, rc.top, rc.right, rc.bottom);
         if (SUCCEEDED(hr))
             hr = pVideoWindow->put_Visible(OATRUE);
+        if (SUCCEEDED(hr))
+            hr = pVideoWindow->put_MessageDrain((OAHWND)hwnd);
         if (SUCCEEDED(hr))
             hr = pVideoWindow.CopyTo(ppVideoWindow);
     }
@@ -1390,17 +1395,33 @@ Win32Error(const char * szPrefix, HRESULT hr)
     Tcl_Obj *msgObj = NULL;
     char * lpBuffer = NULL;
     DWORD  dwLen = 0;
+    IErrorInfo *pErrorInfo = NULL;
+
+    if (SUCCEEDED(::GetErrorInfo(0, &pErrorInfo)) && pErrorInfo)
+    {
+        BSTR sDesc;
+        if (SUCCEEDED(pErrorInfo->GetDescription(&sDesc)))
+        {
+            msgObj = Tcl_NewStringObj(szPrefix, -1);
+            Tcl_AppendToObj(msgObj, ": ", 2);
+            Tcl_AppendUnicodeToObj(msgObj, (const Tcl_UniChar *)sDesc, SysStringLen(sDesc));
+            SysFreeString(sDesc);
+        }
+        pErrorInfo->Release();
+        if (msgObj)
+            return msgObj;
+    }
 
     dwLen = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER
                           | FORMAT_MESSAGE_FROM_SYSTEM,
                           NULL, (DWORD)hr, LANG_NEUTRAL,
-                          (LPTSTR)&lpBuffer, 0, NULL);
+                          (LPSTR)&lpBuffer, 0, NULL);
     if (dwLen < 1) {
         dwLen = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER
                               | FORMAT_MESSAGE_FROM_STRING
                               | FORMAT_MESSAGE_ARGUMENT_ARRAY,
                               "code 0x%1!08X!%n", 0, LANG_NEUTRAL,
-                              (LPTSTR)&lpBuffer, 0, (va_list *)&hr);
+                              (LPSTR)&lpBuffer, 0, (va_list *)&hr);
     }
 
     msgObj = Tcl_NewStringObj(szPrefix, -1);
