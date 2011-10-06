@@ -1,10 +1,10 @@
-[manpage_begin tkvideo n 1.2.1]
+[manpage_begin tkvideo n 1.4.0]
 [copyright {2004, Pat Thoyts}]
 [comment {link rel="stylesheet" href="manpage.css" type="text/css"}]
 [moddesc   {tkvideo}]
 [titledesc {Tk video widget}]
 [require Tk 8.4]
-[require tkvideo [opt 1.2]]
+[require tkvideo [opt 1.4]]
 [description]
 [para]
 
@@ -97,6 +97,13 @@ Moves the current seek position to the specified location. The start
 or the stream will always be 0 and the end of the stream is provided
 as the third list item returned by the [cmd tell] command.
 
+[call [arg "pathName"] [method "volume"] [opt [arg "value"]]]
+
+Get or set the volume of the audio channel if one is present. The
+volume values are a floating-point linear range from silent at 0 to
+maximum at 100. If no value is provided, the current volume is
+returned.
+
 [list_end]
 
 
@@ -166,7 +173,7 @@ visible.
 }]
    
 [section AUTHORS]
-Pat Thoyts <patthoyts@users.berlios.de>
+Pat Thoyts <patthoyts@users.sourceforge.net>
 
 [keywords video webcam mpeg avi]
 [manpage_end]
