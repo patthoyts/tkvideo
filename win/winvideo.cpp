@@ -199,6 +199,7 @@ VideopInitializeSource(Video *videoPtr)
 
     pPlatformData->spec.nDeviceIndex = -1;
     pPlatformData->spec.nAudioIndex = -1;
+    memset(pPlatformData->spec.wszSourcePath, 0, sizeof(pPlatformData->spec.wszSourcePath));
     wcsncpy(pPlatformData->spec.wszOutputPath,
         (const wchar_t *)Tcl_GetUnicode(videoPtr->outputPtr), MAX_PATH);
 
