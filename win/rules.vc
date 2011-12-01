@@ -556,7 +556,7 @@ TCL_DOES_STUBS	= 1
 !endif
 
 !if $(TCLINSTALL)
-_TCLBINDIR      = "$(_TCLDIR)\bin"
+_TCLBINDIR	= $(_TCLDIR)\bin
 TCLSH		= "$(_TCLBINDIR)\tclsh$(TCL_VERSION)$(SUFX).exe"
 !if !exist($(TCLSH)) && $(TCL_THREADS)
 TCLSH           = "$(_TCLBINDIR)\tclsh$(TCL_VERSION)t$(SUFX).exe"
