@@ -162,7 +162,7 @@ DEBUGFLAGS     = $(DEBUGFLAGS) -RTC1
 DEBUGFLAGS     = $(DEBUGFLAGS) -GZ
 !endif
 
-COMPILERFLAGS  =-W3
+COMPILERFLAGS  =-W3 -DUNICODE -D_UNICODE
 
 # In v13 -GL and -YX are incompatible.
 !if [nmakehlp -c -YX]
@@ -459,7 +459,9 @@ OPTDEFINES	= $(OPTDEFINES) -DTCL_CFG_PROFILED
 !if "$(MACHINE)" == "IA64" || "$(MACHINE)" == "AMD64"
 OPTDEFINES	= $(OPTDEFINES) -DTCL_CFG_DO64BIT
 !endif
-
+!if $(VCVERSION) < 1300
+OPTDEFINES	= $(OPTDEFINES) -DNO_STRTOI64
+!endif
 
 #----------------------------------------------------------
 # Locate the Tcl headers to build against

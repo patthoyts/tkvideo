@@ -15,7 +15,7 @@
  */
 
 #define WIN32_LEAN_AND_MEAN
-#define OEMRESOURCE 
+#define OEMRESOURCE
 #include <windows.h>
 #include <shlwapi.h>
 #include "tkvideo.h"
@@ -176,7 +176,7 @@ VideopDestroy(Video *videoPtr)
     if (platformPtr->wndproc != NULL)
     {
         HWND hwnd = Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)); 
-        SetWindowLong(hwnd, GWL_WNDPROC, (LONG)platformPtr->wndproc);
+        SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)platformPtr->wndproc);
         platformPtr->wndproc = NULL;
         RemoveProp(hwnd, TEXT("Tkvideo"));
     }
@@ -218,10 +218,10 @@ VideopInitializeSource(Video *videoPtr)
         HWND hwnd = Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)); 
         hr = ConnectVideo(videoPtr, hwnd, &pPlatformData->pVideoWindow);
         if (SUCCEEDED(hr)) {
-            // Subclass the tk window so we can recieve graph messages
+            // Subclass the tk window so we can receive graph messages
             if (pPlatformData->wndproc == NULL) {
                 SetProp(hwnd, TEXT("Tkvideo"), (HANDLE)videoPtr);
-                pPlatformData->wndproc = (WNDPROC)SetWindowLong(hwnd, GWL_WNDPROC, (LONG)VideopWndProc);
+                pPlatformData->wndproc = (WNDPROC)SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)VideopWndProc);
             }
 
             long w = 0, h = 0;
@@ -1389,7 +1389,8 @@ VideopWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
     if (uMsg == WM_GRAPHNOTIFY && platformPtr->pMediaEvent != NULL)
     {
-        long evCode = 0, lParam1 = 0, lParam2 = 0;
+        long evCode = 0;
+        LONG_PTR lParam1 = 0, lParam2 = 0;
         while (SUCCEEDED( platformPtr->pMediaEvent->GetEvent(&evCode, &lParam1, &lParam2, 0) ))
         {
             switch (evCode)
@@ -1417,7 +1418,7 @@ VideopWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                      */
                     /* ??? VideopInitializeSource(videoPtr); */
                 }
-                SendVirtualEvent(videoPtr->tkwin, "VideoErrorAbort", lParam1);
+                SendVirtualEvent(videoPtr->tkwin, "VideoErrorAbort", (LONG)lParam1);
                 break;
             case EC_REPAINT:
                 /* FIX ME: SendExposeEvent ?? */
