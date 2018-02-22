@@ -366,6 +366,13 @@ VideopWidgetPropPageCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl
         if (strncmp("filter", page, 6) == 0) {
             ShowCaptureFilterProperties(&pPlatformData->spec, pFilterGraph, Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)));
         } else if (strncmp("pin", page, 3) == 0) {
+
+            FILTER_STATE former_state = State_Stopped;
+            CComPtr<IMediaControl> pMediaControl;
+            HRESULT hr = pFilterGraph->QueryInterface(&pMediaControl);
+            if (SUCCEEDED(hr))
+                pMediaControl->GetState(100, reinterpret_cast<OAFilterState *>(&former_state));
+
             VideoStop(videoPtr);
             ShowCapturePinProperties(&pPlatformData->spec, pFilterGraph, Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)));
             long w = 0, h = 0;
@@ -373,6 +380,9 @@ VideopWidgetPropPageCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl
                 videoPtr->videoHeight = h;
                 videoPtr->videoWidth = w;
             }
+
+            if (pMediaControl && former_state == State_Running)
+                VideoStart(videoPtr);
         } else {
             Tcl_WrongNumArgs(interp, 2, objv, "\"filter\" or \"pin\"");
             r = TCL_ERROR;
