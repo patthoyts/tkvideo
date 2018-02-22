@@ -250,9 +250,12 @@ ReleasePlatformData(VideoPlatformData *pPlatformData)
     }
     const int nLimit = sizeof(pPlatformData->spec.aFilters)/sizeof(pPlatformData->spec.aFilters[0]);
     for (int n = 0; n < nLimit; ++n) {
-        if (pPlatformData->spec.aFilters[n])
+        if (pPlatformData->spec.aFilters[n]) {
+            if (pPlatformData->pFilterGraph)
+                pPlatformData->pFilterGraph->RemoveFilter(pPlatformData->spec.aFilters[n]);
             pPlatformData->spec.aFilters[n]->Release();
-        pPlatformData->spec.aFilters[n] = NULL;
+            pPlatformData->spec.aFilters[n] = NULL;
+        }
     }
     if (pPlatformData->pMediaEvent) {
         pPlatformData->pMediaEvent->SetNotifyWindow((OAHWND)NULL, 0, 0);
