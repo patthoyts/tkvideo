@@ -19,6 +19,7 @@
 #define RENDERER_FILTER_NAME  L"Renderer"
 #define STILL_GRABBER_NAME    L"Still Grabber"
 #define STILL_RENDERER_NAME   L"Still Renderer"
+#define CUSTOM_FILTER_NAME    L"Custom Filter"
 
 HRESULT ShowPropertyPages(LPUNKNOWN Object, LPCOLESTR Caption = NULL, HWND hwnd = NULL);
 HRESULT GetDeviceMoniker(CLSID Category, int DeviceIndex, IMoniker **ppMoniker);

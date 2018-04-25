@@ -32,20 +32,23 @@ typedef enum EFilterIndices {
     FileSinkIndex,
     RendererFilterIndex,
     StillGrabberIndex,
-    StillRendererIndex
+    StillRendererIndex,
+    CustomFilterIndex,
 } EFilterIndices;
 
 typedef struct GraphSpecification {
     int nDeviceIndex;
     int nAudioIndex;
     BOOL bAudioRequired;
-    IBaseFilter *aFilters[8];
+    IBaseFilter *aFilters[9];
     WCHAR wszSourcePath[MAX_PATH];
     WCHAR wszOutputPath[MAX_PATH];
 } GraphSpecification;
 
 HRESULT ConstructCaptureGraph(GraphSpecification *pSpec, IGraphBuilder **ppGraphBuilder);
 HRESULT ConnectFilterGraph(GraphSpecification *pSpec, IGraphBuilder *pGraphBuilder);
+HRESULT ReconnectFilterGraph(GraphSpecification *pSpec, IGraphBuilder *pGraphBuilder);
+HRESULT RemoveFiltersFromGraph(IFilterGraph *pFilterGraph);
 HRESULT DisconnectFilterGraph(IGraphBuilder *pGraphBuilder);
 HRESULT DisconnectPins(IBaseFilter *pFilter);
 HRESULT GetCaptureMediaFormat(IGraphBuilder *pGraph, int index, AM_MEDIA_TYPE **ppmt);

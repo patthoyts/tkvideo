@@ -148,7 +148,19 @@ ConnectFilterGraph(GraphSpecification *pSpec, IGraphBuilder *pGraphBuilder)
         }
         else
         {
-            hr = pBuilder->RenderStream(&PIN_CATEGORY_PREVIEW, &MEDIATYPE_Video, pSpec->aFilters[CaptureFilterIndex],
+            const GUID *pin_category = &PIN_CATEGORY_PREVIEW;
+            IBaseFilter *sourceFilter = pSpec->aFilters[CaptureFilterIndex];
+            if (pSpec->aFilters[CustomFilterIndex] != NULL)
+            {
+                hr = pBuilder->RenderStream(pin_category, &MEDIATYPE_Video, sourceFilter,
+                    NULL, pSpec->aFilters[CustomFilterIndex]);
+                if (SUCCEEDED(hr))
+                {
+                    pin_category = NULL;
+                    sourceFilter = pSpec->aFilters[CustomFilterIndex];
+                }
+            }
+            hr = pBuilder->RenderStream(pin_category, &MEDIATYPE_Video, sourceFilter,
                 pSpec->aFilters[SampleGrabberIndex], pSpec->aFilters[RendererFilterIndex]);
             if (hr == VFW_E_CANNOT_CONNECT && pVMRFilterConfig != NULL)
             {
@@ -175,7 +187,7 @@ ConnectFilterGraph(GraphSpecification *pSpec, IGraphBuilder *pGraphBuilder)
     // Connect audio (if any)
     if (SUCCEEDED(hr))
     {
-        if (pSpec->bAudioRequired|| (pSpec->aFilters[AudioFilterIndex] && pSpec->aFilters[MuxFilterIndex]))
+        if (pSpec->bAudioRequired || (pSpec->aFilters[AudioFilterIndex] && pSpec->aFilters[MuxFilterIndex]))
         {
             CComPtr<IBaseFilter> pTeeFilter;
             pTeeFilter.CoCreateInstance(CLSID_InfTee);
@@ -237,7 +249,72 @@ ConnectFilterGraph(GraphSpecification *pSpec, IGraphBuilder *pGraphBuilder)
 
     return hr;
 }
-    
+
+HRESULT
+ReconnectFilterGraph(GraphSpecification *pSpec, IGraphBuilder *pGraphBuilder)
+{
+    const wchar_t *aFilterNames[9] = {
+        CAPTURE_FILTER_NAME,    // CaptureFilterIndex,
+        AUDIO_FILTER_NAME,      // AudioFilterIndex,
+        SAMPLE_GRABBER_NAME,    // SampleGrabberIndex,
+        L"Mux",                 // MuxFilterIndex,
+        L"FileSink",            // FileSinkIndex,
+        RENDERER_FILTER_NAME,   // RendererFilterIndex,
+        STILL_GRABBER_NAME,     // StillGrabberIndex,
+        STILL_RENDERER_NAME,    // StillRendererIndex,
+        CUSTOM_FILTER_NAME,     // CustomFilterIndex,
+
+    };
+
+    HRESULT hr = DisconnectFilterGraph(pGraphBuilder);
+    if (SUCCEEDED(hr))
+        hr = RemoveFiltersFromGraph(pGraphBuilder);
+    for (int n = 0; SUCCEEDED(hr) && n < sizeof(pSpec->aFilters) / sizeof(pSpec->aFilters[0]); ++n)
+    {
+        if (pSpec->aFilters[n])
+            hr = pGraphBuilder->AddFilter(pSpec->aFilters[n], aFilterNames[n]);
+    }
+    if (SUCCEEDED(hr))
+        hr = ConnectFilterGraph(pSpec, pGraphBuilder);
+    return hr;
+}
+
+
+/**
+ * Remove all the filters from a graph. 
+ * You should most likely disconnect them all first.
+ */
+
+HRESULT
+RemoveFiltersFromGraph(IFilterGraph *pFilterGraph)
+{
+    CComPtr<IEnumFilters> pEnumFilters;
+    IBaseFilter *pFilters[16];
+    ULONG nFilters = 0;
+    HRESULT hrLoop = S_OK;
+    HRESULT hr = pFilterGraph->EnumFilters(&pEnumFilters);
+    while (SUCCEEDED(hr) && hrLoop == S_OK)
+    {
+        hrLoop = pEnumFilters->Next(16, pFilters, &nFilters);
+        if (hrLoop == VFW_E_ENUM_OUT_OF_SYNC)
+        {
+            hr = pEnumFilters->Reset(); // re-sync the enumerator
+            hrLoop = S_OK;
+            continue;
+        }
+        if (SUCCEEDED(hrLoop))
+        {
+            for (ULONG n = 0; SUCCEEDED(hr) && n < nFilters; n++)
+            {
+                hr = pFilterGraph->RemoveFilter(pFilters[n]);
+                pFilters[n]->Release();
+                pFilters[n] = 0;
+            }
+        }
+    }
+    return hr;
+}
+
 /**
  *  Disconnect all the connected pins for each filter.
  */
@@ -402,7 +479,7 @@ MediaType(LPCWSTR sPath, LPCGUID *ppMediaType, LPCGUID *ppMediaSubType)
     LPCWSTR sExt = PathFindExtensionW(sPath);
     for (int n = 0; sExt && n < sizeof(map) / sizeof(map[0]); n++)
     {
-        if (wcsnicmp(map[n].wsz, sExt, 4) == 0)
+        if (_wcsnicmp(map[n].wsz, sExt, 4) == 0)
         {
             *ppMediaType = map[n].type;
             *ppMediaSubType = map[n].subtype;

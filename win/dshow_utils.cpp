@@ -115,7 +115,7 @@ GetDeviceID(CLSID Category, int DeviceIndex, BSTR *pstrName)
         hr = CreateBindCtx(0, &pctx);
     if (SUCCEEDED(hr))
     {
-        LPOLESTR ocsz, pstr;
+        LPOLESTR ocsz = NULL, pstr = NULL;
         hr = pmk->GetDisplayName(pctx, NULL, &ocsz);
         if (SUCCEEDED(hr))
         {

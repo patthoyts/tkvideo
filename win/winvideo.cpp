@@ -975,18 +975,24 @@ ShowCapturePinProperties(GraphSpecification *pSpec, IGraphBuilder *pGraphBuilder
             hr = FindPinByCategory(pFilter, PIN_CATEGORY_CAPTURE, &pPin);
         if (SUCCEEDED(hr))
         {
-            hr = DisconnectFilterGraph(pGraphBuilder);
-            const int nLimit = sizeof(pSpec->aFilters)/sizeof(pSpec->aFilters[0]);
-            for (int n = 0; n < nLimit; ++n) {
-                if (pSpec->aFilters[n])
-                    DisconnectPins(pSpec->aFilters[n]);
+            if (SUCCEEDED(hr))
+                hr = DisconnectFilterGraph(pGraphBuilder);
+            if (SUCCEEDED(hr))
+            {
+                const int nLimit = sizeof(pSpec->aFilters) / sizeof(pSpec->aFilters[0]);
+                for (int n = 0; n < nLimit; ++n)
+                {
+                    if (pSpec->aFilters[n])
+                        DisconnectPins(pSpec->aFilters[n]);
+                }
             }
             if (SUCCEEDED(hr))
             {
                 int oldMode = Tcl_SetServiceMode(TCL_SERVICE_ALL);
                 hr = ::ShowPropertyPages(pPin, L"Capture Pin", hwnd);
                 Tcl_SetServiceMode(oldMode);
-                ConnectFilterGraph(pSpec, pGraphBuilder);
+                ATLASSERT(SUCCEEDED(hr) && L"PropertyPage problem");
+                hr = ReconnectFilterGraph(pSpec, pGraphBuilder);
             }
         }
     }
