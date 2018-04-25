@@ -15,7 +15,7 @@
  */
 
 #define WIN32_LEAN_AND_MEAN
-#define OEMRESOURCE 
+#define OEMRESOURCE
 #include <windows.h>
 #include <shlwapi.h>
 #include "tkvideo.h"
@@ -176,7 +176,7 @@ VideopDestroy(Video *videoPtr)
     if (platformPtr->wndproc != NULL)
     {
         HWND hwnd = Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)); 
-        SetWindowLong(hwnd, GWL_WNDPROC, (LONG)platformPtr->wndproc);
+        SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)platformPtr->wndproc);
         platformPtr->wndproc = NULL;
         RemoveProp(hwnd, TEXT("Tkvideo"));
     }
@@ -218,10 +218,10 @@ VideopInitializeSource(Video *videoPtr)
         HWND hwnd = Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)); 
         hr = ConnectVideo(videoPtr, hwnd, &pPlatformData->pVideoWindow);
         if (SUCCEEDED(hr)) {
-            // Subclass the tk window so we can recieve graph messages
+            // Subclass the tk window so we can receive graph messages
             if (pPlatformData->wndproc == NULL) {
                 SetProp(hwnd, TEXT("Tkvideo"), (HANDLE)videoPtr);
-                pPlatformData->wndproc = (WNDPROC)SetWindowLong(hwnd, GWL_WNDPROC, (LONG)VideopWndProc);
+                pPlatformData->wndproc = (WNDPROC)SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)VideopWndProc);
             }
 
             long w = 0, h = 0;
@@ -250,9 +250,12 @@ ReleasePlatformData(VideoPlatformData *pPlatformData)
     }
     const int nLimit = sizeof(pPlatformData->spec.aFilters)/sizeof(pPlatformData->spec.aFilters[0]);
     for (int n = 0; n < nLimit; ++n) {
-        if (pPlatformData->spec.aFilters[n])
+        if (pPlatformData->spec.aFilters[n]) {
+            if (pPlatformData->pFilterGraph)
+                pPlatformData->pFilterGraph->RemoveFilter(pPlatformData->spec.aFilters[n]);
             pPlatformData->spec.aFilters[n]->Release();
-        pPlatformData->spec.aFilters[n] = NULL;
+            pPlatformData->spec.aFilters[n] = NULL;
+        }
     }
     if (pPlatformData->pMediaEvent) {
         pPlatformData->pMediaEvent->SetNotifyWindow((OAHWND)NULL, 0, 0);
@@ -363,6 +366,13 @@ VideopWidgetPropPageCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl
         if (strncmp("filter", page, 6) == 0) {
             ShowCaptureFilterProperties(&pPlatformData->spec, pFilterGraph, Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)));
         } else if (strncmp("pin", page, 3) == 0) {
+
+            FILTER_STATE former_state = State_Stopped;
+            CComPtr<IMediaControl> pMediaControl;
+            HRESULT hr = pFilterGraph->QueryInterface(&pMediaControl);
+            if (SUCCEEDED(hr))
+                pMediaControl->GetState(100, reinterpret_cast<OAFilterState *>(&former_state));
+
             VideoStop(videoPtr);
             ShowCapturePinProperties(&pPlatformData->spec, pFilterGraph, Tk_GetHWND(Tk_WindowId(videoPtr->tkwin)));
             long w = 0, h = 0;
@@ -370,6 +380,9 @@ VideopWidgetPropPageCmd(ClientData clientData, Tcl_Interp *interp, int objc, Tcl
                 videoPtr->videoHeight = h;
                 videoPtr->videoWidth = w;
             }
+
+            if (pMediaControl && former_state == State_Running)
+                VideoStart(videoPtr);
         } else {
             Tcl_WrongNumArgs(interp, 2, objv, "\"filter\" or \"pin\"");
             r = TCL_ERROR;
@@ -962,18 +975,24 @@ ShowCapturePinProperties(GraphSpecification *pSpec, IGraphBuilder *pGraphBuilder
             hr = FindPinByCategory(pFilter, PIN_CATEGORY_CAPTURE, &pPin);
         if (SUCCEEDED(hr))
         {
-            hr = DisconnectFilterGraph(pGraphBuilder);
-            const int nLimit = sizeof(pSpec->aFilters)/sizeof(pSpec->aFilters[0]);
-            for (int n = 0; n < nLimit; ++n) {
-                if (pSpec->aFilters[n])
-                    DisconnectPins(pSpec->aFilters[n]);
+            if (SUCCEEDED(hr))
+                hr = DisconnectFilterGraph(pGraphBuilder);
+            if (SUCCEEDED(hr))
+            {
+                const int nLimit = sizeof(pSpec->aFilters) / sizeof(pSpec->aFilters[0]);
+                for (int n = 0; n < nLimit; ++n)
+                {
+                    if (pSpec->aFilters[n])
+                        DisconnectPins(pSpec->aFilters[n]);
+                }
             }
             if (SUCCEEDED(hr))
             {
                 int oldMode = Tcl_SetServiceMode(TCL_SERVICE_ALL);
                 hr = ::ShowPropertyPages(pPin, L"Capture Pin", hwnd);
                 Tcl_SetServiceMode(oldMode);
-                ConnectFilterGraph(pSpec, pGraphBuilder);
+                ATLASSERT(SUCCEEDED(hr) && L"PropertyPage problem");
+                hr = ReconnectFilterGraph(pSpec, pGraphBuilder);
             }
         }
     }
@@ -1389,7 +1408,8 @@ VideopWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
     if (uMsg == WM_GRAPHNOTIFY && platformPtr->pMediaEvent != NULL)
     {
-        long evCode = 0, lParam1 = 0, lParam2 = 0;
+        long evCode = 0;
+        LONG_PTR lParam1 = 0, lParam2 = 0;
         while (SUCCEEDED( platformPtr->pMediaEvent->GetEvent(&evCode, &lParam1, &lParam2, 0) ))
         {
             switch (evCode)
@@ -1417,7 +1437,7 @@ VideopWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
                      */
                     /* ??? VideopInitializeSource(videoPtr); */
                 }
-                SendVirtualEvent(videoPtr->tkwin, "VideoErrorAbort", lParam1);
+                SendVirtualEvent(videoPtr->tkwin, "VideoErrorAbort", (LONG)lParam1);
                 break;
             case EC_REPAINT:
                 /* FIX ME: SendExposeEvent ?? */

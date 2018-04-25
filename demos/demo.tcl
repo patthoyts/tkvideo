@@ -9,7 +9,7 @@
 # $Id$
 
 package require Tk 8.4
-package require tkvideo 1.4.0
+package require tkvideo 1.4.1
 
 variable noimg [catch {package require Img}]
 
@@ -332,7 +332,7 @@ proc StreamServer {Application {port 8020}} {
     upvar #0 $Application app
     set app(stream_server) [socket -server [list StreamAccept $Application] $port]
     set app(stream_timer) [after idle [list StreamSend $Application]]
-    set app(stream_interval) 1000
+    set app(stream_interval) 80
     set app(stream_clients) {}
     if {[catch {package require vfs::mk4}]} {
         set tmpdir $::env(TEMP)
@@ -356,12 +356,13 @@ proc StreamAccept {Application chan clientaddr clientport} {
     set state(boundary) "--boundary$r"
     lappend app(stream_clients) $token
     fconfigure $chan -encoding utf-8 -translation crlf -buffering line
+    puts stderr "$chan: accepted connection with token $token"
     fileevent $chan readable [list StreamRead $token]
 }
 proc StreamClose {token} {
     upvar #0 $token state
     upvar #0 $state(app) app
-    puts stderr "$state(client) has disconnected"
+    puts stderr "$state(chan): $state(client) has disconnected"
     catch {after cancel $state(timer)}
     catch {close $state(chan)}
     set ndx [lsearch -exact $app(stream_clients) $token]
@@ -372,15 +373,10 @@ proc StreamClose {token} {
 }
 proc StreamRead {token} {
     upvar #0 $token state
-    if {[eof $state(chan)]} {
-        fileevent $state(chan) readable {}
-        StreamClose $token
-        return
-    }
     switch -exact -- $state(mode) {
         connect {
             set count [gets $state(chan) line]
-            puts stderr "connect: read '$line'"
+            puts stderr "$state(chan): connect: read \[$count\] '$line'"
             if {$count == -1} {
                 StreamClose $token
             } elseif {$count == 0} {
@@ -392,8 +388,14 @@ proc StreamRead {token} {
         }
         default {
             set data [read $state(chan)]
-            puts stderr "recieved [string length $data] bytes"
+            puts stderr "$state(chan): recieved [string length $data] bytes"
         }
+    }
+    if {[eof $state(chan)]} {
+        puts stderr "$state(chan): eof for token $token"
+        fileevent $state(chan) readable {}
+        StreamClose $token
+        return
     }
 }
 proc StreamWrite {token} {
@@ -401,12 +403,13 @@ proc StreamWrite {token} {
     fileevent $state(chan) writable {}
     puts $state(chan) "HTTP/1.1 200 OK"
     puts $state(chan) [clock format [clock seconds] -gmt 1 \
-                           -format "%a, %d %b  %Y %H:%M:%S GMT"]
-    puts $state(chan) "Server: Tkvideo/1.0"
-    puts $state(chan) "Connection: close"
-    puts $state(chan) "Content-Type: multipart/x-mixed-replace;boundary=$state(boundary)"
+                           -format "date: %a, %d %b  %Y %H:%M:%S GMT"]
+    puts $state(chan) "server: Tkvideo/1.0"
+    puts $state(chan) "connection: close"
+    puts $state(chan) "content-type: multipart/x-mixed-replace;boundary=$state(boundary)"
     puts $state(chan) ""
     set state(mode) transmit
+    puts stderr "$state(chan): ready to transmit"
 }
 proc StreamSend {Application} {
     upvar #0 $Application app
@@ -419,10 +422,13 @@ proc StreamSend {Application} {
             fconfigure $f -encoding binary -translation binary -eofchar {}
             set data [read $f]
             close $f
-        
+            puts stderr "prepared [string length $data] bytes for $app(stream_clients)"
+
             foreach client $app(stream_clients) {
                 upvar #0 $client state
+                puts stderr [array get state]
                 if {$state(mode) ne "transmit"} continue
+                puts stderr "$client: sending [string length $data]"
                 fconfigure $state(chan) -encoding utf-8 -translation crlf -buffering line
                 puts $state(chan) "$state(boundary)"
                 puts $state(chan) "Content-Type: image/jpeg"
@@ -475,14 +481,14 @@ proc About {mw} {
     wm transient $dlg $mw
     wm withdraw $dlg
     ${NS}::frame $dlg.base
-    text $dlg.t -background SystemButtonFace -width 64 -height 10 -relief flat
+    text $dlg.t -background SystemButtonFace -width 64 -height 12 -relief flat -wrap word
     $dlg.t tag configure center -justify center
     $dlg.t tag configure h1 -font {Arial 14 bold}
     $dlg.t tag configure link -underline 1
     $dlg.t tag configure copy
     $dlg.t insert end \
         "tkvideo widget demo" {center h1} "\n\n" {} \
-        "http://tkvideo.berlios.de/" {center link} "\n\n" {} \
+        "http://www.patthoyts.tk/tkvideo/" {center link} "\n\n" {} \
         "The tkvideo widget uses DirectX to render video and audio multimedia data from\
             data files or from capture devices like webcams." {} "\n\n" {} \
         "Copyright (c) 2003-2007 Pat Thoyts <patthoyts@users.sourceforge.net>" {center copy}

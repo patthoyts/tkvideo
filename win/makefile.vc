@@ -328,7 +328,9 @@ baselibs  = $(baselibs) $(TKSTUBLIB)
 # Avoid 'unresolved external symbol __security_cookie' errors.
 # c.f. http://support.microsoft.com/?id=894573
 !if "$(MACHINE)" == "IA64" || "$(MACHINE)" == "AMD64"
+!if $(VCVERSION) > 1399 && $(VCVERSION) < 1500
 baselibs   = $(baselibs) bufferoverflowU.lib
+!endif
 !endif
 
 baselibs   = $(baselibs) $(DXSDKLIB)
@@ -473,10 +475,10 @@ install-binaries:
 	@echo Installing binaries to '$(SCRIPT_INSTALL_DIR)'
 	@if not exist "$(SCRIPT_INSTALL_DIR)" mkdir "$(SCRIPT_INSTALL_DIR)"
 	@$(CPY) $(PRJLIB) "$(SCRIPT_INSTALL_DIR)" >NUL
-	@echo Installing stub library to '$(LIB_INSTALL_DIR)'
-	@$(CPY) $(PRJSTUBLIB) "$(LIB_INSTALL_DIR)" > NUL
-	@echo Installing headers to '$(INCLUDE_INSTALL_DIR)'
-	@for %i in ($(PRJHEADERS)) do @$(CPY) %i "$(INCLUDE_INSTALL_DIR)" > NUL
+#	@echo Installing stub library to '$(LIB_INSTALL_DIR)'
+#	@$(CPY) $(PRJSTUBLIB) "$(LIB_INSTALL_DIR)" > NUL
+#	@echo Installing headers to '$(INCLUDE_INSTALL_DIR)'
+#	@for %i in ($(PRJHEADERS)) do @$(CPY) %i "$(INCLUDE_INSTALL_DIR)" > NUL
 
 install-libraries: pkgIndex
 	@echo Installing libraries to '$(SCRIPT_INSTALL_DIR)'
