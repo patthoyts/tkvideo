@@ -1,6 +1,15 @@
 RELEASE NOTES                                              -*- text -*-
 -----------------------------------------------------------------------
 
+Version 1.4.1                                              (24-Apr-2018)
+-------------
+
+Switched the build system to use CMake.
+
+Resolved a problem with switching video sources leaving behind an
+active object in the graph which leads to interleaving output from
+file and webcam sources.
+
 Version 1.3.0                                              (10-Aug-2007)
 -------------
 
