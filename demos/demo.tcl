@@ -256,7 +256,7 @@ proc SetDeviceSource {Application} {
     puts stderr "$app(video) configure -source $app(videoindex)\
         -audio $app(audioindex) -output [file nativename $app(savefile)]"
     set vndx [lsearch [$app(video) devices video] $app(videoindex)]
-    set andx [lsearch [$app(video) devices audio] $app(audioindex)]
+    set andx {} ;#[lsearch [$app(video) devices audio] $app(audioindex)]
     $app(video) configure -source $vndx -audio $andx \
         -output [file nativename $app(savefile)]
     $app(slider) configure -from 0 -to 0
@@ -328,7 +328,7 @@ proc SnapSaveAs {img} {
 # -------------------------------------------------------------------------
 # Serve up an MJPEG stream
 
-proc StreamServer {Application {port 8020}} {
+proc StreamServer {Application {port 5001}} {
     upvar #0 $Application app
     set app(stream_server) [socket -server [list StreamAccept $Application] $port]
     set app(stream_timer) [after idle [list StreamSend $Application]]
@@ -435,7 +435,7 @@ proc StreamSend {Application} {
                 puts $state(chan) "Content-Length: [string length $data]"
                 puts $state(chan) ""
                 fconfigure $state(chan) -encoding binary -translation binary -buffering full
-                puts -nonewline $state(chan) $data\r\n
+                puts -nonewline $state(chan) "$data\r\n$state(boundary)\r\n"
                 flush $state(chan)
             }
         } err]} {

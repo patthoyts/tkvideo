@@ -4,22 +4,27 @@
 # rebuild:
 #   cmake --build . --config Release --clean-first
 
-cmake_minimum_required(VERSION 3.0)
-cmake_policy(SET CMP0048 NEW)
+cmake_minimum_required(VERSION 3.10)
 
 project(tkvideo VERSION 1.4.1)
+enable_language(RC)
 
 set (PKG_VERSION ${PROJECT_VERSION_MAJOR}${PROJECT_VERSION_MINOR}${PROJECT_VERSION_PATCH})
 set (PKG_DOT_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}")
 
-if (NOT CMAKE_BUILD_TYPE)
-    set (CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Select the build type." FORCE)
-endif(NOT CMAKE_BUILD_TYPE)
-
 find_package(TclStub REQUIRED)
 
-set (TARGETNAME ${PROJECT_NAME}${PKG_VERSION})
-add_library(${TARGETNAME} SHARED generic/tkvideo.c win/winvideo.cpp win/graph.cpp win/dshow_utils.cpp win/tkvideo.rc)
+set(TARGETNAME ${PROJECT_NAME}${PKG_VERSION})
+set(SOURCE
+     generic/tkvideo.c
+     win/winvideo.cpp
+     win/graph.cpp
+     win/dshow_utils.cpp
+     win/tkvideo.rc)
+     
+add_library(${TARGETNAME} SHARED ${SOURCE})
+
+target_compile_features(${TARGETNAME} PRIVATE c_std_11)
 
 include_directories(${TCL_INCLUDE_PATH} ${TK_INCLUDE_PATH})
 include_directories(generic win)
@@ -47,9 +52,14 @@ set(CMAKE_MODULE_LINKER_FLAGS_RELEASE "${CMAKE_MODULE_LINKER_FLAGS_RELEASE} /SAF
 set(CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO} /SAFESEH:NO")
 
 # Perform the pkgIndex.tcl.in substitutions and copy to the output directory.
-set (PACKAGE_NAME "${PROJECT_NAME}")
-set (PACKAGE_VERSION "${PKG_DOT_VERSION}")
-set (PKG_LIB_FILE "${TARGETNAME}${CMAKE_SHARED_LIBRARY_SUFFIX}")
-configure_file( pkgIndex.tcl.in pkgIndex.tcl @ONLY)
-add_custom_command(TARGET ${TARGETNAME} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    "${PROJECT_BINARY_DIR}/pkgIndex.tcl" $<TARGET_FILE_DIR:${TARGETNAME}>)
+#set (PACKAGE_NAME "${PROJECT_NAME}")
+#set (PACKAGE_VERSION "${PKG_DOT_VERSION}")
+#set (PKG_LIB_FILE "${TARGETNAME}${CMAKE_SHARED_LIBRARY_SUFFIX}")
+#configure_file( pkgIndex.tcl.in pkgIndex.tcl @ONLY)
+#add_custom_command(TARGET ${TARGETNAME} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
+#    "${PROJECT_BINARY_DIR}/pkgIndex.tcl" $<TARGET_FILE_DIR:${TARGETNAME}>)
+
+# Generate the pkgIndex.tcl file
+file(GENERATE
+    OUTPUT "$<TARGET_FILE_DIR:${TARGETNAME}>/pkgIndex.tcl"
+    CONTENT "package ifneeded ${PROJECT_NAME} ${PKG_DOT_VERSION} [list load [file join $dir $<TARGET_FILE_NAME:${TARGETNAME}>]]\n")

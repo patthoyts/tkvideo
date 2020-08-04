@@ -1,9 +1,13 @@
 #include "graph.h"
+#include <d3d9.h>
+#include <vmr9.h>
+#include <initguid.h>
 
 #if _MSC_VER >= 100
 #pragma comment(lib, "amstrmid")
 #pragma comment(lib, "gdi32")
 #pragma comment(lib, "shlwapi")
+#pragma comment(lib, "d3d9")
 #endif
 
 static HRESULT CreateCompatibleSampleGrabber(IBaseFilter **ppFilter);
@@ -55,33 +59,47 @@ ConstructCaptureGraph(GraphSpecification *pSpec, IGraphBuilder **ppGraph)
         }
         else
         {
-            CComPtr<IMoniker> pmk;
-            CComPtr<IBindCtx> pBindContext;
+            if (!pSpec->aFilters[CaptureFilterIndex])
+            {
+                CComPtr<IMoniker> pmk;
+                CComPtr<IBindCtx> pBindContext;
 
-            // Add our input device to the capture graph.
-            if (SUCCEEDED(hr))
-                hr = GetDeviceMoniker(CLSID_VideoInputDeviceCategory, pSpec->nDeviceIndex, &pmk);
-            if (!pmk)
-                hr = E_INVALIDARG;
-            if (SUCCEEDED(hr))
-                hr = CreateBindCtx(0, &pBindContext);
-            if (SUCCEEDED(hr))
-                hr = pmk->BindToObject(pBindContext, NULL, IID_IBaseFilter, reinterpret_cast<void**>(&pSpec->aFilters[CaptureFilterIndex]));
+                // Add our input device to the capture graph.
+                if (SUCCEEDED(hr))
+                    hr = GetDeviceMoniker(CLSID_VideoInputDeviceCategory, pSpec->nDeviceIndex, &pmk);
+                if (!pmk)
+                    hr = E_INVALIDARG;
+                if (SUCCEEDED(hr))
+                    hr = CreateBindCtx(0, &pBindContext);
+                if (SUCCEEDED(hr))
+                    hr = pmk->BindToObject(pBindContext, NULL, IID_IBaseFilter, reinterpret_cast<void**>(&pSpec->aFilters[CaptureFilterIndex]));
+            }
             if (SUCCEEDED(hr))
                 hr = pGraph->AddFilter(pSpec->aFilters[CaptureFilterIndex], CAPTURE_FILTER_NAME);
 
-            pmk.Release(); pBindContext.Release();
             if (SUCCEEDED(hr) && pSpec->nAudioIndex != -1)
             {
-                HRESULT hrA = GetDeviceMoniker(CLSID_AudioInputDeviceCategory, pSpec->nAudioIndex, &pmk);
-                if (SUCCEEDED(hrA))
-                    hrA = CreateBindCtx(0, &pBindContext);
-                if (SUCCEEDED(hrA))
-                    hrA = pmk->BindToObject(pBindContext, NULL, IID_IBaseFilter, reinterpret_cast<void**>(&pSpec->aFilters[AudioFilterIndex]));
+                HRESULT hrA = S_FALSE;
+                if (!pSpec->aFilters[AudioFilterIndex])
+                {
+                    CComPtr<IMoniker> pmk;
+                    CComPtr<IBindCtx> pBindContext;
+                    hrA = GetDeviceMoniker(CLSID_AudioInputDeviceCategory, pSpec->nAudioIndex, &pmk);
+                    if (SUCCEEDED(hrA))
+                        hrA = CreateBindCtx(0, &pBindContext);
+                    if (SUCCEEDED(hrA))
+                        hrA = pmk->BindToObject(pBindContext, NULL, IID_IBaseFilter, reinterpret_cast<void**>(&pSpec->aFilters[AudioFilterIndex]));
+                }
                 if (SUCCEEDED(hrA))
                     hrA = pGraph->AddFilter(pSpec->aFilters[AudioFilterIndex], AUDIO_FILTER_NAME);
             }
         }
+    }
+
+    // If a custom filter is defined, add to the graph.
+    if (pSpec->aFilters[CustomFilterIndex])
+    {
+        hr = pGraph->AddFilter(pSpec->aFilters[CustomFilterIndex], CUSTOM_FILTER_NAME);
     }
 
     // Add in a Sample Grabber to the graph
@@ -92,18 +110,19 @@ ConstructCaptureGraph(GraphSpecification *pSpec, IGraphBuilder **ppGraph)
             hr = pGraph->AddFilter(pSpec->aFilters[SampleGrabberIndex], SAMPLE_GRABBER_NAME);
     }
 
-    // Add a video renderer to the graph
+    // Add a video renderer to the graph. Create the default renderer if one is not provided.
     if (SUCCEEDED(hr))
     {
-        //hr = pRenderFilter.CoCreateInstance(CLSID_VideoMixingRenderer9);
-        hr = CoCreateInstance(CLSID_VideoRendererDefault, NULL, CLSCTX_ALL, IID_IBaseFilter, (void **)&pSpec->aFilters[RendererFilterIndex]);
-        if (FAILED(hr))
+        if (!pSpec->aFilters[RendererFilterIndex])
+            hr = CoCreateInstance(CLSID_VideoMixingRenderer9, NULL, CLSCTX_ALL, IID_IBaseFilter, (void**)&pSpec->aFilters[RendererFilterIndex]);
+        if (!pSpec->aFilters[RendererFilterIndex])
             hr = CoCreateInstance(CLSID_VideoRenderer, NULL, CLSCTX_ALL, IID_IBaseFilter, (void **)&pSpec->aFilters[RendererFilterIndex]);
         if (SUCCEEDED(hr))
             hr = pGraph->AddFilter(pSpec->aFilters[RendererFilterIndex], RENDERER_FILTER_NAME);
         if (SUCCEEDED(hr))
         {
-            CComPtr<IVMRFilterConfig> pVMRFilterConfig;
+            // For the video mixing renderer, set the number of streams
+            CComPtr<IVMRFilterConfig9> pVMRFilterConfig;
             HRESULT hrx = pSpec->aFilters[RendererFilterIndex]->QueryInterface(&pVMRFilterConfig);
             if (SUCCEEDED(hrx))
                 hrx = pVMRFilterConfig->SetNumberOfStreams(2);
